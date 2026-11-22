@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b1329" />
+      <stop offset="50%" stop-color="#060913" />
+      <stop offset="100%" stop-color="#02040a" />
+    </linearGradient>
+    <linearGradient id="cyanBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe" />
+      <stop offset="100%" stop-color="#4facfe" />
+    </linearGradient>
+    <linearGradient id="neonPurple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Background Squircle with subtle border glow -->
+  <rect x="16" y="16" width="480" height="480" rx="110" fill="url(#bgGrad)" stroke="#1e293b" stroke-width="4" />
+  <rect x="20" y="20" width="472" height="472" rx="106" fill="none" stroke="url(#cyanBlue)" stroke-width="2" stroke-opacity="0.3" />
+
+  <!-- Outer Isometric Cube / Docker Hexagon -->
+  <g transform="translate(256, 240)">
+    <!-- Top Face -->
+    <polygon points="0,-120 104,-60 0,0 -104,-60" fill="#1e293b" fill-opacity="0.6" stroke="url(#cyanBlue)" stroke-width="4" stroke-linejoin="round" />
+    <!-- Left Face -->
+    <polygon points="-104,-60 0,0 0,120 -104,60" fill="#0f172a" fill-opacity="0.8" stroke="url(#cyanBlue)" stroke-width="4" stroke-linejoin="round" />
+    <!-- Right Face -->
+    <polygon points="0,0 104,-60 104,60 0,120" fill="#090d16" fill-opacity="0.9" stroke="url(#neonPurple)" stroke-width="4" stroke-linejoin="round" />
+
+    <!-- Docker/Swarm connection nodes on the vertices -->
+    <circle cx="0" cy="-120" r="8" fill="#00f2fe" filter="url(#glow)" />
+    <circle cx="104" cy="-60" r="8" fill="#4facfe" filter="url(#glow)" />
+    <circle cx="104" cy="60" r="8" fill="#a855f7" filter="url(#glow)" />
+    <circle cx="0" cy="120" r="8" fill="#6366f1" filter="url(#glow)" />
+    <circle cx="-104" cy="60" r="8" fill="#00f2fe" filter="url(#glow)" />
+    <circle cx="-104" cy="-60" r="8" fill="#38bdf8" filter="url(#glow)" />
+
+    <!-- Core Terminal Prompt in center >_ -->
+    <!-- Prompt chevron '>' -->
+    <path d="M -40,-25 L -10,0 L -40,25" fill="none" stroke="#00f2fe" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
+    <!-- Cursor '_' -->
+    <line x1="5" y1="22" x2="35" y2="22" stroke="#a855f7" stroke-width="12" stroke-linecap="round" filter="url(#glow)" />
+  </g>
+
+  <!-- Linux Penguin Beak Accent in subtle amber -->
+  <polygon points="256,380 244,395 268,395" fill="#f59e0b" filter="url(#glow)" />
+  <circle cx="236" cy="370" r="4" fill="#38bdf8" />
+  <circle cx="276" cy="370" r="4" fill="#38bdf8" />
+</svg>

@@ -1,4 +1,4 @@
-# LinuxMenux 🐧⚡
+# Linux Menux 🐧⚡
 
 > Dashboard Web e Terminal Interativo para servidores Linux com suporte nativo a **Docker Swarm, Dokploy, Traefik, Iptables e Multi-Distro (Ubuntu, Debian, Manjaro, Arch, RHEL, Rocky, Alma, openSUSE, Fedora)**.
 
@@ -62,4 +62,4 @@ sudo /usr/local/share/linuxmenux/uninstall.sh
 
 ## 📄 Licença
 
-GPL-3.0 © 2026 RicardTech
+GPL-3.0 © 2026 Ricard Tech

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 160" width="640" height="160">
+  <defs>
+    <linearGradient id="cyanBlueLogo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe" />
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+    <linearGradient id="purpleGradLogo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" />
+      <stop offset="100%" stop-color="#6366f1" />
+    </linearGradient>
+    <filter id="glowLogo" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Left Icon Emblem (Scale & Position) -->
+  <g transform="translate(80, 80) scale(0.48)">
+    <!-- Top Face -->
+    <polygon points="0,-120 104,-60 0,0 -104,-60" fill="#1e293b" fill-opacity="0.8" stroke="url(#cyanBlueLogo)" stroke-width="5" stroke-linejoin="round" />
+    <!-- Left Face -->
+    <polygon points="-104,-60 0,0 0,120 -104,60" fill="#0f172a" fill-opacity="0.9" stroke="url(#cyanBlueLogo)" stroke-width="5" stroke-linejoin="round" />
+    <!-- Right Face -->
+    <polygon points="0,0 104,-60 104,60 0,120" fill="#090d16" stroke="url(#purpleGradLogo)" stroke-width="5" stroke-linejoin="round" />
+
+    <!-- Terminal Prompt in center -->
+    <path d="M -40,-25 L -10,0 L -40,25" fill="none" stroke="#00f2fe" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" filter="url(#glowLogo)" />
+    <line x1="5" y1="22" x2="35" y2="22" stroke="#a855f7" stroke-width="14" stroke-linecap="round" filter="url(#glowLogo)" />
+  </g>
+
+  <!-- Text "Linux" -->
+  <text x="170" y="102" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="58" font-weight="800" fill="#ffffff" letter-spacing="1">Linux</text>
+
+  <!-- Text "Menux" with Cyan-Purple Gradient -->
+  <text x="335" y="102" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="58" font-weight="800" fill="url(#cyanBlueLogo)" letter-spacing="1">Menux</text>
+
+  <!-- Version / System Indicator pill -->
+  <rect x="525" y="66" width="62" height="24" rx="12" fill="#1e293b" stroke="#334155" stroke-width="1.5" />
+  <text x="556" y="82" font-family="monospace" font-size="12" font-weight="700" fill="#38bdf8" text-anchor="middle">PRO</text>
+
+  <!-- Subtitle -->
+  <text x="172" y="130" font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="500" fill="#94a3b8" letter-spacing="2">DOCKER SWARM &amp; SERVER MANAGER</text>
+</svg>
