@@ -1,5 +1,5 @@
 """
-LinuxMenux Universal Package Manager
+Linux Menux Universal Package Manager
 Thread-safe update checks, one-click execution, and reboot-required detection
 across Debian/Ubuntu (APT), Arch/Manjaro (Pacman), RHEL/Rocky/Alma/Fedora (DNF), and openSUSE (Zypper).
 """

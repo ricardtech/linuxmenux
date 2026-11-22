@@ -1,0 +1,2398 @@
+"use client"
+
+import { useState, useEffect, useRef } from "react"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card"
+import { Package, Ruler, HeartPulse, Cpu, MemoryStick, HardDrive, CircleDot, Network, Server, Settings2, FileText, RefreshCw, Shield, AlertTriangle, Info, Loader2, Check, Database, CloudOff, Code, X, Copy, Sparkles, ArrowUpCircle, BellOff, Globe2, Github } from "lucide-react"
+import { Badge } from "./ui/badge"
+import { Button } from "./ui/button"
+import { NotificationSettings } from "./notification-settings"
+import { HealthThresholds } from "./health-thresholds"
+import { LxcUpdateDetection } from "./lxc-update-detection"
+import { DiskExclusions } from "./disk-exclusions"
+import { optimizationDescription, optimizationToolName } from "../lib/optimization-descriptions"
+import { ScriptTerminalModal } from "./script-terminal-modal"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
+import { Switch } from "./ui/switch"
+import { Input } from "./ui/input"
+import { getNetworkUnit } from "../lib/format-network"
+import { fetchApi } from "../lib/api-config"
+import { SUPPORTED_LANGUAGES, useI18n } from "../lib/i18n/provider"
+import { useIsPbs } from "../lib/use-platform"
+import type { LanguageCode } from "../lib/i18n/languages"
+import { NavTabOrderCard } from "./nav-tab-order-card"
+import { StorageDisplayCard } from "./storage-display-card"
+import { optimizationSourceError, optimizationSourceName, type OptimizationSourceError, type OptimizationSourceResponse } from "../lib/optimization-source-errors"
+
+// GitHub Dark color palette for bash syntax highlighting
+const BASH_KEYWORDS = new Set([
+  'if','then','else','elif','fi','for','while','until','do','done','case','esac',
+  'function','return','local','readonly','export','declare','typeset','unset',
+  'source','alias','exit','break','continue','in','select','time','trap',
+])
+const BASH_BUILTINS = new Set([
+  'echo','printf','read','cd','pwd','ls','cat','grep','sed','awk','cut','sort','uniq','tee','wc',
+  'head','tail','find','xargs','chmod','chown','chgrp','mkdir','rmdir','rm','cp','mv','ln','touch',
+  'ps','kill','killall','pkill','pgrep','top','htop','df','du','free','uptime','uname','hostname',
+  'systemctl','journalctl','service','apt','apt-get','dpkg','dnf','yum','zypper','pacman',
+  'curl','wget','ssh','scp','rsync','tar','gzip','gunzip','bzip2','zip','unzip',
+  'mount','umount','lsblk','blkid','fdisk','parted','mkfs','fsck','swapon','swapoff',
+  'ip','ifconfig','iptables','netstat','ss','ping','traceroute','dig','nslookup','nc',
+  'sudo','su','whoami','id','groups','passwd','useradd','userdel','usermod','groupadd',
+  'test','true','false','sleep','wait','eval','exec','command','type','which','hash',
+  'set','getopts','shift','let','expr','jq','sed','grep','awk','tr',
+  'modprobe','lsmod','rmmod','insmod','dmesg','sysctl','ulimit','nohup','disown','bg','fg',
+  'zpool','zfs','qm','pct','pvesh','pvesm','pvenode','pveam','pveversion','vzdump',
+  'smartctl','nvme','ipmitool','sensors','upsc','dkms','modinfo','lspci','lsusb','lscpu',
+])
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+function highlightBash(code: string): string {
+  // Token-based highlighter — processes line by line to avoid cross-line state issues
+  const lines = code.split('\n')
+  const out: string[] = []
+
+  for (const line of lines) {
+    let i = 0
+    let result = ''
+
+    while (i < line.length) {
+      const ch = line[i]
+
+      // Comments (# to end of line, but not inside strings — simple heuristic)
+      if (ch === '#' && (i === 0 || /\s/.test(line[i - 1]))) {
+        result += `<span style="color:#8b949e">${escapeHtml(line.slice(i))}</span>`
+        i = line.length
+        continue
+      }
+
+      // Strings: double-quoted (may contain $variables)
+      if (ch === '"') {
+        let j = i + 1
+        let content = ''
+        while (j < line.length && line[j] !== '"') {
+          if (line[j] === '\\' && j + 1 < line.length) {
+            content += line[j] + line[j + 1]
+            j += 2
+          } else {
+            content += line[j]
+            j++
+          }
+        }
+        const str = '"' + content + (line[j] === '"' ? '"' : '')
+        // Highlight $vars inside strings
+        const strHtml = escapeHtml(str).replace(
+          /(\$\{[^}]+\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@#?*$!-])/g,
+          '<span style="color:#79c0ff">$1</span>'
+        )
+        result += `<span style="color:#a5d6ff">${strHtml}</span>`
+        i = j + 1
+        continue
+      }
+
+      // Strings: single-quoted (literal, no interpolation)
+      if (ch === "'") {
+        let j = i + 1
+        while (j < line.length && line[j] !== "'") j++
+        const str = line.slice(i, j + 1)
+        result += `<span style="color:#a5d6ff">${escapeHtml(str)}</span>`
+        i = j + 1
+        continue
+      }
+
+      // Variables outside strings
+      if (ch === '$') {
+        const rest = line.slice(i)
+        let m = rest.match(/^\$\{[^}]+\}/)
+        if (!m) m = rest.match(/^\$[A-Za-z_][A-Za-z0-9_]*/)
+        if (!m) m = rest.match(/^\$[0-9@#?*$!-]/)
+        if (m) {
+          result += `<span style="color:#79c0ff">${escapeHtml(m[0])}</span>`
+          i += m[0].length
+          continue
+        }
+      }
+
+      // Numbers
+      if (/[0-9]/.test(ch) && (i === 0 || /[\s=(\[,:;+\-*/]/.test(line[i - 1]))) {
+        const rest = line.slice(i)
+        const m = rest.match(/^[0-9]+/)
+        if (m) {
+          result += `<span style="color:#79c0ff">${m[0]}</span>`
+          i += m[0].length
+          continue
+        }
+      }
+
+      // Identifiers — check if keyword, builtin, or function definition
+      if (/[A-Za-z_]/.test(ch)) {
+        const rest = line.slice(i)
+        const m = rest.match(/^[A-Za-z_][A-Za-z0-9_-]*/)
+        if (m) {
+          const word = m[0]
+          const after = line.slice(i + word.length)
+          if (BASH_KEYWORDS.has(word)) {
+            result += `<span style="color:#ff7b72">${word}</span>`
+          } else if (/^\s*\(\)\s*\{?/.test(after)) {
+            // function definition: name() { ... }
+            result += `<span style="color:#d2a8ff">${word}</span>`
+          } else if (BASH_BUILTINS.has(word) && (i === 0 || /[\s|;&(]/.test(line[i - 1]))) {
+            result += `<span style="color:#ffa657">${word}</span>`
+          } else {
+            result += escapeHtml(word)
+          }
+          i += word.length
+          continue
+        }
+      }
+
+      // Operators and special chars
+      if (/[|&;<>(){}[\]=!+*\/%~^]/.test(ch)) {
+        result += `<span style="color:#ff7b72">${escapeHtml(ch)}</span>`
+        i++
+        continue
+      }
+
+      // Default: escape and append
+      result += escapeHtml(ch)
+      i++
+    }
+
+    out.push(result)
+  }
+
+  return out.join('\n')
+}
+
+interface SuppressionCategory {
+  key: string
+  label: string
+  category: string
+  icon: string
+  hours: number
+}
+
+const SUPPRESSION_OPTIONS = [
+  { value: "24", labelKey: "settings.healthMonitor.options.24h" },
+  { value: "72", labelKey: "settings.healthMonitor.options.3d" },
+  { value: "168", labelKey: "settings.healthMonitor.options.1w" },
+  { value: "720", labelKey: "settings.healthMonitor.options.1m" },
+  { value: "8760", labelKey: "settings.healthMonitor.options.1y" },
+  { value: "custom", labelKey: "settings.healthMonitor.options.custom" },
+  { value: "-1", labelKey: "settings.healthMonitor.options.permanent" },
+]
+
+const CATEGORY_ICONS: Record<string, React.ElementType> = {
+  cpu: Cpu,
+  memory: MemoryStick,
+  storage: HardDrive,
+  disk: CircleDot,
+  network: Network,
+  vms: Server,
+  services: Settings2,
+  logs: FileText,
+  updates: RefreshCw,
+  security: Shield,
+}
+
+// Acronyms that should stay uppercase in the normalized label.
+const ERROR_KEY_ACRONYMS = new Set([
+  "CPU", "GPU", "IO", "RAM", "SSD", "HDD", "NIC", "API",
+  "URL", "SSH", "TLS", "SSL", "DNS", "DHCP", "NTP",
+  "NFS", "SMB", "CIFS", "ISCSI",
+  "PBS", "PVE", "LXC", "VM", "SMART", "ZFS", "LVM", "RAID",
+  "ID", "UUID", "MAC", "IP",
+])
+
+// Convert an internal error_key (e.g. `pve_storage_full_PBS-Cloud`)
+// into a human-readable label (`PVE Storage Full: PBS-Cloud`).
+// Tokens are split by `_`; trailing tokens that look like a resource
+// identifier (contain a hyphen, uppercase letter or digit, or match
+// a known device/interface pattern) are grouped after `:` so the
+// title reads naturally. Known acronyms keep their uppercase form.
+function normalizeErrorKey(key: string): string {
+  if (!key) return ""
+
+  const parts = key.split("_")
+  if (parts.length === 0) return key
+
+  const looksLikeResource = (s: string): boolean => {
+    if (!s) return false
+    if (s.includes("-")) return true
+    if (/[A-Z]/.test(s)) return true
+    if (/\d/.test(s)) return true
+    // Linux block/network device patterns
+    if (/^(sd[a-z]+\d*|nvme\d+n\d+|vmbr\d+|eth\d+|ens\d+|enp\d+|wlp\d+|tap\d+|veth\w+|vtnet\d+|vnet\d+)$/.test(s)) {
+      return true
+    }
+    return false
+  }
+
+  let cut = parts.length
+  for (let i = parts.length - 1; i >= 1; i--) {
+    if (looksLikeResource(parts[i])) {
+      cut = i
+    } else {
+      break
+    }
+  }
+
+  const descParts = parts.slice(0, cut)
+  const resourceParts = parts.slice(cut)
+
+  const titleize = (w: string): string => {
+    if (!w) return w
+    const upper = w.toUpperCase()
+    if (ERROR_KEY_ACRONYMS.has(upper)) return upper
+    return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()
+  }
+
+  const desc = descParts.map(titleize).join(" ")
+  if (resourceParts.length === 0) return desc
+  return `${desc}: ${resourceParts.join("_")}`
+}
+
+function healthCategoryKey(category: SuppressionCategory): string {
+  const raw = category.category || category.key.replace(/^suppress_/, "")
+  const aliases: Record<string, string> = {
+    disks: "disk",
+    pve_services: "services",
+  }
+  return aliases[raw] || raw
+}
+
+interface ProxMenuxTool {
+  key: string
+  name: string
+  enabled: boolean
+  version?: string
+  // Sprint 12B: post-install function update fields. The version above is
+  // what the user has installed; available_version is what the on-disk
+  // post-install script declares. has_update is set when the latter is
+  // higher than the former. update_source_certain is false for legacy
+  // tools that lack a recorded source — the UI must let the user pick
+  // auto vs custom before re-running. `function` is the bash function
+  // name the wrapper script should invoke for the chosen source.
+  available_version?: string
+  description?: string
+  source?: string  // "auto" | "custom" | ""
+  function?: string
+  function_auto?: string
+  function_custom?: string
+  has_update?: boolean
+  update_source_certain?: boolean
+  has_source?: boolean
+  deprecated?: boolean
+}
+
+interface RemoteStorage {
+  name: string
+  type: string
+  status: string
+  total: number
+  used: number
+  available: number
+  percent: number
+  capacity_known?: boolean
+  exclude_health: boolean
+  exclude_notifications: boolean
+  excluded_at?: string
+  reason?: string
+}
+
+interface NetworkInterface {
+  name: string
+  type: string
+  is_up: boolean
+  speed: number
+  ip_address: string | null
+  exclude_health: boolean
+  exclude_notifications: boolean
+  excluded_at?: string
+  reason?: string
+}
+
+export function Settings() {
+  const { language, setLanguage, t } = useI18n()
+  const isPbs = useIsPbs()
+  const tFallback = (key: string, fallback: string) => {
+    const translated = t(key)
+    return translated === key ? fallback : translated
+  }
+  const interfaceTypeLabel = (type: string) =>
+    tFallback(`network.interfaceTypes.${type.toLowerCase()}`, type)
+  const [proxmenuxTools, setProxmenuxTools] = useState<ProxMenuxTool[]>([])
+  const [updatesAvailableCount, setUpdatesAvailableCount] = useState(0)
+  const [loadingTools, setLoadingTools] = useState(true)
+  // Sprint 12B: multi-select modal state. Tracks which tools the user
+  // has marked for batch update + the open/closed state of the dialog.
+  const [updateModalOpen, setUpdateModalOpen] = useState(false)
+  const [selectedUpdates, setSelectedUpdates] = useState<Set<string>>(new Set())
+  // Sprint 12B: script terminal modal — running one or many post-install
+  // function updates. `params` is what gets handed to flask_script_runner
+  // (becomes env vars for update_post_install_function.sh).
+  const [updateTerminal, setUpdateTerminal] = useState<{
+    open: boolean
+    title: string
+    description: string
+    params: Record<string, string>
+  } | null>(null)
+  const [networkUnitSettings, setNetworkUnitSettings] = useState<"Bytes" | "Bits">("Bytes")
+  const [loadingUnitSettings, setLoadingUnitSettings] = useState(true)
+  // Edit-mode gating for Network Units. Matches the pattern used
+  // by Health Monitor / Notifications / LxcUpdateDetection so every
+  // settings card behaves the same way: view by default, edit only
+  // after the user explicitly opens the pencil.
+  const [unitsEditMode, setUnitsEditMode] = useState(false)
+  const [pendingUnit, setPendingUnit] = useState<"Bytes" | "Bits" | null>(null)
+  const [savedUnit, setSavedUnit] = useState(false)
+  // Code viewer modal state. `version` is the version the user has
+  // installed (read from installed_tools.json); `availableVersion` is
+  // what the on-disk script declares — they differ when an update is
+  // pending. Sprint 12B v2 tweak: the header now shows both so the user
+  // can see at a glance what they have and what they'd get.
+  const [codeModal, setCodeModal] = useState<{
+    open: boolean
+    loading: boolean
+    toolName: string
+    toolKey: string
+    version: string
+    availableVersion: string
+    functionName: string
+    source: string
+    script: string
+    error: OptimizationSourceError | null
+    deprecated: boolean
+  }>({ open: false, loading: false, toolName: '', toolKey: '', version: '', availableVersion: '', functionName: '', source: '', script: '', error: null, deprecated: false })
+  const [codeCopied, setCodeCopied] = useState(false)
+  const codeRequest = useRef(0)
+  const closeCodeModal = () => {
+    codeRequest.current += 1
+    setCodeModal(prev => ({ ...prev, open: false }))
+    setCodeCopied(false)
+  }
+  useEffect(() => () => { codeRequest.current += 1 }, [])
+  useEffect(() => {
+    if (!codeModal.open) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeCodeModal()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [codeModal.open])
+  
+  // Health Monitor suppression settings
+  const [suppressionCategories, setSuppressionCategories] = useState<SuppressionCategory[]>([])
+  const [loadingHealth, setLoadingHealth] = useState(true)
+  const [healthEditMode, setHealthEditMode] = useState(false)
+  const [savingAllHealth, setSavingAllHealth] = useState(false)
+  const [savedAllHealth, setSavedAllHealth] = useState(false)
+  const [pendingChanges, setPendingChanges] = useState<Record<string, number>>({})
+  const [customValues, setCustomValues] = useState<Record<string, string>>({})
+  
+  // Remote Storage Exclusions
+  const [remoteStorages, setRemoteStorages] = useState<RemoteStorage[]>([])
+  const [storagesEditMode, setStoragesEditMode] = useState(false)
+  // Pending toggle values keyed by storage.name. A row is only in
+  // the map if the user flipped it while in edit mode; on Save we
+  // walk the map and push each change to the backend, on Cancel we
+  // drop it.
+  const [pendingStorages, setPendingStorages] = useState<Map<string, { exclude_health: boolean; exclude_notifications: boolean }>>(new Map())
+  const [savingStorages, setSavingStorages] = useState(false)
+  const [savedStorages, setSavedStorages] = useState(false)
+  const [loadingStorages, setLoadingStorages] = useState(true)
+  const [savingStorage, setSavingStorage] = useState<string | null>(null)
+  
+  // Network Interface Exclusions
+  const [networkInterfaces, setNetworkInterfaces] = useState<NetworkInterface[]>([])
+  const [interfacesEditMode, setInterfacesEditMode] = useState(false)
+  const [pendingInterfaces, setPendingInterfaces] = useState<Map<string, { exclude_health: boolean; exclude_notifications: boolean }>>(new Map())
+  const [savingInterfaces, setSavingInterfaces] = useState(false)
+  const [savedInterfaces, setSavedInterfaces] = useState(false)
+  const [loadingInterfaces, setLoadingInterfaces] = useState(true)
+  const [savingInterface, setSavingInterface] = useState<string | null>(null)
+
+  // Optional GitHub API authentication for app release/tag checks. The
+  // backend only returns whether a token exists; the secret itself never
+  // leaves the host after it has been saved.
+  const [githubTokenConfigured, setGithubTokenConfigured] = useState(false)
+  const [githubTokenLoading, setGithubTokenLoading] = useState(true)
+  const [githubTokenEditMode, setGithubTokenEditMode] = useState(false)
+  const [githubTokenDraft, setGithubTokenDraft] = useState("")
+  const [githubTokenSaving, setGithubTokenSaving] = useState(false)
+  const [githubTokenSaved, setGithubTokenSaved] = useState(false)
+  const [githubTokenError, setGithubTokenError] = useState("")
+
+  // Active Suppressions panel — lists every error currently dismissed
+  // (time-limited or permanent) so the user can re-enable individual
+  // alerts. Mirrors what /api/health/full returns under `dismissed`.
+  type ActiveSuppression = {
+    error_key: string
+    category: string
+    severity?: string
+    reason?: string
+    acknowledged_at?: string
+    suppression_hours?: number
+    suppression_remaining_hours?: number
+    permanent?: boolean
+  }
+  const [activeSuppressions, setActiveSuppressions] = useState<ActiveSuppression[]>([])
+  const [loadingSuppressions, setLoadingSuppressions] = useState(true)
+  // Queue of error_keys the user has marked for re-enable while in Edit
+  // mode. The actual API calls fire on Save (alongside any dropdown
+  // changes); Cancel discards the queue.
+  const [pendingReEnables, setPendingReEnables] = useState<Set<string>>(new Set())
+
+  // Sprint 13 / issue #195: snippets storage selector. The bash helper
+  // resolves it on first GPU passthrough and saves to config.json; this
+  // card surfaces the same setting so the user can see/change it from
+  // the Monitor without touching JSON or running bash interactively.
+  const [snippetsStorage, setSnippetsStorage] = useState<string>("")
+  const [snippetsCandidates, setSnippetsCandidates] = useState<Array<{ name: string; type: string; active: boolean }>>([])
+  const [snippetsSaving, setSnippetsSaving] = useState(false)
+
+  const loadSnippetsStorage = async () => {
+    try {
+      const data = await fetchApi("/api/proxmenux/snippets-storage")
+      if (data.success) {
+        setSnippetsStorage(data.selected || "")
+        setSnippetsCandidates(data.candidates || [])
+      }
+    } catch (err) {
+      console.error("Failed to load snippets storage candidates:", err)
+    }
+  }
+
+  const saveSnippetsStorage = async (storage: string) => {
+    if (!storage || storage === snippetsStorage) return
+    setSnippetsSaving(true)
+    try {
+      const data = await fetchApi("/api/proxmenux/snippets-storage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storage }),
+      })
+      if (data.success) {
+        setSnippetsStorage(storage)
+      }
+    } catch (err) {
+      console.error("Failed to save snippets storage:", err)
+    } finally {
+      setSnippetsSaving(false)
+    }
+  }
+
+  const loadGithubTokenStatus = async () => {
+    setGithubTokenLoading(true)
+    try {
+      const data = await fetchApi<{ configured: boolean }>("/api/apps/github-token")
+      setGithubTokenConfigured(!!data.configured)
+      setGithubTokenError("")
+    } catch (err) {
+      console.error("Failed to load GitHub API token status:", err)
+      setGithubTokenError(t("settings.githubApi.loadFailed"))
+    } finally {
+      setGithubTokenLoading(false)
+    }
+  }
+
+  const saveGithubToken = async () => {
+    const token = githubTokenDraft.trim()
+    if (!token) return
+    setGithubTokenSaving(true)
+    setGithubTokenError("")
+    try {
+      await fetchApi<{ success: boolean; configured: boolean }>("/api/apps/github-token", {
+        method: "PUT",
+        body: JSON.stringify({ token }),
+      })
+      setGithubTokenConfigured(true)
+      setGithubTokenDraft("")
+      setGithubTokenEditMode(false)
+      setGithubTokenSaved(true)
+      window.setTimeout(() => setGithubTokenSaved(false), 2500)
+    } catch (err) {
+      console.error("Failed to save GitHub API token:", err)
+      setGithubTokenError(t("settings.githubApi.saveFailed"))
+    } finally {
+      setGithubTokenSaving(false)
+    }
+  }
+
+  const removeGithubToken = async () => {
+    setGithubTokenSaving(true)
+    setGithubTokenError("")
+    try {
+      await fetchApi<{ success: boolean; configured: boolean }>("/api/apps/github-token", {
+        method: "DELETE",
+      })
+      setGithubTokenConfigured(false)
+      setGithubTokenDraft("")
+      setGithubTokenEditMode(false)
+      setGithubTokenSaved(true)
+      window.setTimeout(() => setGithubTokenSaved(false), 2500)
+    } catch (err) {
+      console.error("Failed to remove GitHub API token:", err)
+      setGithubTokenError(t("settings.githubApi.removeFailed"))
+    } finally {
+      setGithubTokenSaving(false)
+    }
+  }
+
+  useEffect(() => {
+  loadProxmenuxTools()
+  getUnitsSettings()
+  loadHealthSettings()
+  loadRemoteStorages()
+  loadActiveSuppressions()
+  loadNetworkInterfaces()
+  loadSnippetsStorage()
+  loadGithubTokenStatus()
+  }, [])
+
+  // Refresh the Active Suppressions list whenever:
+  //  (a) another component dispatches `health-suppression-changed`
+  //      (e.g. the dashboard Health card after Dismiss / Re-enable), or
+  //  (b) the user returns focus to this tab.
+  // Without this, dismissing an alert from the Health Monitor while
+  // the Settings page is mounted leaves the panel stale until full
+  // reload.
+  useEffect(() => {
+    const onChange = () => { loadActiveSuppressions() }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadActiveSuppressions()
+    }
+    window.addEventListener("health-suppression-changed", onChange)
+    window.addEventListener("focus", onChange)
+    document.addEventListener("visibilitychange", onVisible)
+    return () => {
+      window.removeEventListener("health-suppression-changed", onChange)
+      window.removeEventListener("focus", onChange)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [])
+
+  const loadProxmenuxTools = async () => {
+    try {
+      const data = await fetchApi("/api/proxmenux/installed-tools")
+      if (data.success) {
+        setProxmenuxTools(data.installed_tools || [])
+        // Sprint 12B: backend computes the count, no need to derive it
+        // from has_update on every render.
+        setUpdatesAvailableCount(data.updates_available_count || 0)
+      }
+    } catch (err) {
+      console.error("Failed to load ProxMenux tools:", err)
+    } finally {
+      setLoadingTools(false)
+    }
+  }
+
+  // Sprint 12B: launch the script terminal for one or many post-install
+  // function updates. `entries` is a list of (source, function, key)
+  // triples joined into the FUNCTIONS_BATCH env var the wrapper script
+  // understands. After the terminal closes we reload the tools list so
+  // the freshly-applied versions are reflected in the cards.
+  const runPostInstallUpdates = (entries: Array<{ source: string; function: string; key: string; name: string }>) => {
+    if (entries.length === 0) return
+    const batch = entries.map(e => `${e.source}:${e.function}:${e.key}`).join("\n")
+    const title = entries.length === 1
+      ? t("settings.optimizations.updateOneTitle", { name: optimizationToolName(entries[0].key, entries[0].name, t) })
+      : t("settings.optimizations.updateManyTitle", { count: entries.length })
+    const description = entries.length === 1
+      ? t("settings.optimizations.updateOneDescription", { functionName: entries[0].function, source: entries[0].source })
+      : t("settings.optimizations.updateManyDescription", { count: entries.length })
+    setUpdateTerminal({
+      open: true,
+      title,
+      description,
+      params: {
+        EXECUTION_MODE: "web",
+        FUNCTIONS_BATCH: batch,
+      },
+    })
+  }
+
+  const closeUpdateTerminal = async () => {
+    setUpdateTerminal(null)
+    // Sprint 12B v2: force the server-side rescan FIRST, then refetch
+    // the tools list. The previous order (fetch + scan in parallel)
+    // raced — the fetch returned the stale cache before the scan had a
+    // chance to update it, so the badge and the purple cards stuck
+    // around until the user hit refresh. Backend's _ensure_fresh_cache
+    // also auto-rescans on file mtime change, but we keep the explicit
+    // POST here as a belt-and-braces signal that an update just landed.
+    try {
+      await fetchApi("/api/updates/post-install/scan", { method: "POST" })
+    } catch {
+      // Auto-refresh on the next read path will still pick up the
+      // change via _ensure_fresh_cache — this catch is just to keep
+      // the close flow non-blocking on transient errors.
+    }
+    loadProxmenuxTools()
+  }
+
+  // Sprint 12B v2: click on a tool's update icon → run the update
+  // straight away. If the tool's source is recorded (modern entries) we
+  // re-run that flow; otherwise (legacy bool entries from before Sprint
+  // 12A) we default to `auto`. Per user feedback the previous "pick
+  // auto/custom" picker was confusing — the system already knows the
+  // available version, and updating doesn't need to ask which flavour
+  // to install in. The user can always re-install via the
+  // customizable post-install flow if they want different parameters.
+  // Resolve which flow (auto vs custom) actually has an implementation
+  // for this tool. Some tools live only in the customizable flow (e.g.
+  // fastfetch, which needs an interactive menu and has no auto
+  // variant). When the recorded source is "auto" but the auto flow has
+  // no function for this tool, the bash wrapper aborts with
+  // "Function '<x>' is not defined in the auto flow". This helper
+  // silently routes to the only available flow instead.
+  const resolveEffectiveSource = (tool: ProxMenuxTool): string => {
+    const recorded = tool.source || "auto"
+    if (recorded === "auto" && !tool.function_auto && tool.function_custom) {
+      return "custom"
+    }
+    if (recorded === "custom" && !tool.function_custom && tool.function_auto) {
+      return "auto"
+    }
+    return recorded
+  }
+
+  const handleSingleToolUpdate = (tool: ProxMenuxTool) => {
+    if (!tool.has_update) return
+    const source = resolveEffectiveSource(tool)
+    runPostInstallUpdates([{
+      source,
+      function: deriveFunctionName(tool, source),
+      key: tool.key,
+      name: tool.name,
+    }])
+  }
+
+  // Backend exposes both function_auto and function_custom per tool so
+  // that legacy bool entries (where the user picks the source at update
+  // time) can route to the correct function in the chosen flow.
+  // When the source is recorded, `function` is already correct.
+  const deriveFunctionName = (tool: ProxMenuxTool, source: string): string => {
+    if (source === "auto") return tool.function_auto || tool.function || ""
+    if (source === "custom") return tool.function_custom || tool.function || ""
+    return tool.function || ""
+  }
+
+  const viewToolSource = async (tool: ProxMenuxTool) => {
+    const request = ++codeRequest.current
+    setCodeCopied(false)
+    setCodeModal({
+      open: true,
+      loading: true,
+      toolName: tool.name,
+      toolKey: tool.key,
+      version: tool.version || '1.0',
+      availableVersion: tool.available_version || tool.version || '1.0',
+      functionName: '',
+      source: '',
+      script: '',
+      error: null,
+      deprecated: !!tool.deprecated,
+    })
+    try {
+      const data = await fetchApi<OptimizationSourceResponse | null>(`/api/proxmenux/tool-source/${tool.key}`)
+      if (request !== codeRequest.current) return
+      if (data?.success === true && typeof data.source === "string" && data.source.trim()) {
+        const source = data.source
+        setCodeModal(prev => ({ ...prev, loading: false, functionName: typeof data.function === "string" ? data.function : '', source, script: typeof data.script === "string" ? data.script : '', deprecated: !!data.deprecated }))
+      } else {
+        setCodeModal(prev => ({ ...prev, loading: false, error: { kind: "unavailable", detail: typeof data?.error === "string" ? data.error : undefined } }))
+      }
+    } catch (error: any) {
+      if (request !== codeRequest.current) return
+      const detail = typeof error?.body?.error === "string" ? error.body.error : undefined
+      setCodeModal(prev => ({ ...prev, loading: false, error: { kind: "loadFailed", detail } }))
+    }
+  }
+
+  const copySourceCode = async () => {
+    const request = codeRequest.current
+    const text = codeModal.source
+    let ok = false
+
+    // Preferred path (HTTPS / localhost). On plain HTTP the Promise rejects,
+    // so we catch and fall through to the textarea fallback.
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text)
+        ok = true
+      }
+    } catch {
+      // fall through
+    }
+
+    if (!ok) {
+      try {
+        const ta = document.createElement("textarea")
+        ta.value = text
+        ta.style.position = "fixed"
+        ta.style.left = "-9999px"
+        ta.style.top = "-9999px"
+        ta.style.opacity = "0"
+        ta.readOnly = true
+        document.body.appendChild(ta)
+        ta.focus()
+        ta.select()
+        ok = document.execCommand("copy")
+        document.body.removeChild(ta)
+      } catch {
+        ok = false
+      }
+    }
+
+    if (ok && request === codeRequest.current) {
+      setCodeCopied(true)
+      setTimeout(() => { if (request === codeRequest.current) setCodeCopied(false) }, 2000)
+    }
+  }
+
+  const changeNetworkUnit = (unit: string) => {
+    const networkUnit = unit as "Bytes" | "Bits"
+    localStorage.setItem("proxmenux-network-unit", networkUnit)
+    setNetworkUnitSettings(networkUnit)
+
+    window.dispatchEvent(new CustomEvent("networkUnitChanged", { detail: networkUnit }))
+
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "proxmenux-network-unit",
+      newValue: networkUnit,
+      url: window.location.href
+    }))
+  }
+
+  const handleCancelUnitsEdit = () => {
+    setPendingUnit(null)
+    setUnitsEditMode(false)
+  }
+
+  const handleSaveUnits = () => {
+    if (pendingUnit && pendingUnit !== networkUnitSettings) {
+      changeNetworkUnit(pendingUnit)
+    }
+    setPendingUnit(null)
+    setUnitsEditMode(false)
+    setSavedUnit(true)
+    setTimeout(() => setSavedUnit(false), 2000)
+  }
+
+  const getUnitsSettings = () => {
+    const networkUnit = getNetworkUnit()
+    setNetworkUnitSettings(networkUnit)
+    setLoadingUnitSettings(false)
+  }
+
+  const loadHealthSettings = async () => {
+    try {
+      const data = await fetchApi("/api/health/settings")
+      if (data.categories) {
+        setSuppressionCategories(data.categories)
+      }
+    } catch (err) {
+      console.error("Failed to load health settings:", err)
+    } finally {
+      setLoadingHealth(false)
+    }
+  }
+
+  const loadRemoteStorages = async () => {
+    try {
+      const data = await fetchApi("/api/health/remote-storages")
+      if (data.storages) {
+        setRemoteStorages(data.storages)
+      }
+    } catch (err) {
+      console.error("Failed to load remote storages:", err)
+    } finally {
+      setLoadingStorages(false)
+    }
+  }
+
+  const loadActiveSuppressions = async () => {
+    try {
+      const data = await fetchApi("/api/health/dismissed")
+      if (data && Array.isArray(data.dismissed)) {
+        setActiveSuppressions(data.dismissed as ActiveSuppression[])
+      }
+    } catch (err) {
+      console.error("Failed to load active suppressions:", err)
+    } finally {
+      setLoadingSuppressions(false)
+    }
+  }
+
+  // Click "Re-enable" on a suppression → POST /api/health/un-acknowledge.
+  // Remove the row optimistically, then re-fetch the list silently to stay
+  // in sync with the server (which may have re-recorded the error if the
+  // condition is still active — that surfaces in the Health Monitor, not
+  // this panel).
+  // Toggles the error_key in the pending re-enable queue. The actual
+  // POST /api/health/un-acknowledge fires on Save (via
+  // handleSaveAllHealth), keeping the UX consistent with the
+  // per-category dropdowns which also defer to Save.
+  const handleReEnable = (errorKey: string) => {
+    if (!healthEditMode) return
+    setPendingReEnables(prev => {
+      const next = new Set(prev)
+      if (next.has(errorKey)) {
+        next.delete(errorKey)
+      } else {
+        next.add(errorKey)
+      }
+      return next
+    })
+  }
+
+  const handleStorageExclusionChange = async (storageName: string, storageType: string, excludeHealth: boolean, excludeNotifications: boolean) => {
+    setSavingStorage(storageName)
+    try {
+      // If both are false, remove the exclusion
+      if (!excludeHealth && !excludeNotifications) {
+        await fetchApi(`/api/health/storage-exclusions/${encodeURIComponent(storageName)}`, {
+          method: "DELETE"
+        })
+      } else {
+        await fetchApi("/api/health/storage-exclusions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            storage_name: storageName,
+            storage_type: storageType,
+            exclude_health: excludeHealth,
+            exclude_notifications: excludeNotifications
+          })
+        })
+      }
+      
+      // Update local state
+      setRemoteStorages(prev => prev.map(s => 
+        s.name === storageName 
+          ? { ...s, exclude_health: excludeHealth, exclude_notifications: excludeNotifications }
+          : s
+      ))
+    } catch (err) {
+      console.error("Failed to update storage exclusion:", err)
+  } finally {
+  setSavingStorage(null)
+  }
+  }
+  
+  const loadNetworkInterfaces = async () => {
+  try {
+  const data = await fetchApi("/api/health/interfaces")
+  if (data.interfaces) {
+  setNetworkInterfaces(data.interfaces)
+  }
+  } catch (err) {
+  console.error("Failed to load network interfaces:", err)
+  } finally {
+  setLoadingInterfaces(false)
+  }
+  }
+  
+  const handleInterfaceExclusionChange = async (interfaceName: string, interfaceType: string, excludeHealth: boolean, excludeNotifications: boolean) => {
+  setSavingInterface(interfaceName)
+  try {
+  // If both are false, remove the exclusion
+  if (!excludeHealth && !excludeNotifications) {
+  await fetchApi(`/api/health/interface-exclusions/${encodeURIComponent(interfaceName)}`, {
+  method: "DELETE"
+  })
+  } else {
+  await fetchApi("/api/health/interface-exclusions", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+  interface_name: interfaceName,
+  interface_type: interfaceType,
+  exclude_health: excludeHealth,
+  exclude_notifications: excludeNotifications
+  })
+  })
+  }
+  // Reload interfaces to get updated state
+  await loadNetworkInterfaces()
+  } catch (err) {
+  console.error("Failed to update interface exclusion:", err)
+  } finally {
+  setSavingInterface(null)
+  }
+  }
+
+  const handleCancelStoragesEdit = () => {
+    setPendingStorages(new Map())
+    setStoragesEditMode(false)
+  }
+
+  const handleSaveStorages = async () => {
+    if (pendingStorages.size === 0) {
+      setStoragesEditMode(false)
+      return
+    }
+    setSavingStorages(true)
+    try {
+      // Sequential to keep the UI's per-row spinner meaningful and
+      // avoid hammering the backend with a burst on cards with many
+      // exclusions.
+      for (const [name, value] of pendingStorages.entries()) {
+        const s = remoteStorages.find(x => x.name === name)
+        if (!s) continue
+        await handleStorageExclusionChange(name, s.type, value.exclude_health, value.exclude_notifications)
+      }
+      setPendingStorages(new Map())
+      setStoragesEditMode(false)
+      setSavedStorages(true)
+      setTimeout(() => setSavedStorages(false), 2000)
+    } finally {
+      setSavingStorages(false)
+    }
+  }
+
+  const handleCancelInterfacesEdit = () => {
+    setPendingInterfaces(new Map())
+    setInterfacesEditMode(false)
+  }
+
+  const handleSaveInterfaces = async () => {
+    if (pendingInterfaces.size === 0) {
+      setInterfacesEditMode(false)
+      return
+    }
+    setSavingInterfaces(true)
+    try {
+      for (const [name, value] of pendingInterfaces.entries()) {
+        const iface = networkInterfaces.find(x => x.name === name)
+        if (!iface) continue
+        await handleInterfaceExclusionChange(name, iface.type, value.exclude_health, value.exclude_notifications)
+      }
+      setPendingInterfaces(new Map())
+      setInterfacesEditMode(false)
+      setSavedInterfaces(true)
+      setTimeout(() => setSavedInterfaces(false), 2000)
+    } finally {
+      setSavingInterfaces(false)
+    }
+  }
+
+  const getSelectValue = (hours: number, key: string): string => {
+    if (hours === -1) return "-1"
+    const preset = SUPPRESSION_OPTIONS.find(o => o.value === String(hours))
+    if (preset && preset.value !== "custom") return String(hours)
+    return "custom"
+  }
+
+  const getEffectiveHours = (cat: SuppressionCategory): number => {
+    if (cat.key in pendingChanges) return pendingChanges[cat.key]
+    return cat.hours
+  }
+
+  const handleSuppressionChange = (settingKey: string, value: string) => {
+    if (value === "custom") {
+      const current = suppressionCategories.find(c => c.key === settingKey)
+      const effectiveHours = current ? getEffectiveHours(current) : 48
+      setCustomValues(prev => ({ ...prev, [settingKey]: String(effectiveHours > 0 ? effectiveHours : 48) }))
+      // Mark as custom mode in pending
+      setPendingChanges(prev => ({ ...prev, [settingKey]: -2 }))
+      return
+    }
+
+    const hours = parseInt(value, 10)
+    if (isNaN(hours)) return
+    setPendingChanges(prev => ({ ...prev, [settingKey]: hours }))
+    // Clear custom input if switching away
+    setCustomValues(prev => {
+      const next = { ...prev }
+      delete next[settingKey]
+      return next
+    })
+  }
+
+  const handleCustomConfirm = (settingKey: string) => {
+    const raw = customValues[settingKey]
+    const hours = parseInt(raw, 10)
+    if (isNaN(hours) || hours < 1) return
+    setPendingChanges(prev => ({ ...prev, [settingKey]: hours }))
+    setCustomValues(prev => {
+      const next = { ...prev }
+      delete next[settingKey]
+      return next
+    })
+  }
+
+  const handleCancelEdit = () => {
+    setHealthEditMode(false)
+    setPendingChanges({})
+    setCustomValues({})
+    setPendingReEnables(new Set())
+  }
+
+  const handleSaveAllHealth = async () => {
+    // Merge pending changes into a payload: only changed categories
+    const payload: Record<string, string> = {}
+    for (const cat of suppressionCategories) {
+      if (cat.key in pendingChanges && pendingChanges[cat.key] !== -2) {
+        payload[cat.key] = String(pendingChanges[cat.key])
+      }
+    }
+
+    const reEnableKeys = Array.from(pendingReEnables)
+    const hasPayload = Object.keys(payload).length > 0
+    const hasReEnables = reEnableKeys.length > 0
+
+    if (!hasPayload && !hasReEnables) {
+      setHealthEditMode(false)
+      setPendingChanges({})
+      setPendingReEnables(new Set())
+      return
+    }
+
+    setSavingAllHealth(true)
+    try {
+      // 1. Persist per-category suppression duration changes (if any)
+      if (hasPayload) {
+        await fetchApi("/api/health/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+
+        setSuppressionCategories(prev =>
+          prev.map(c => {
+            if (c.key in pendingChanges && pendingChanges[c.key] !== -2) {
+              return { ...c, hours: pendingChanges[c.key] }
+            }
+            return c
+          })
+        )
+      }
+
+      // 2. Fire un-acknowledge for every queued re-enable (in parallel)
+      if (hasReEnables) {
+        await Promise.all(
+          reEnableKeys.map(errorKey =>
+            fetchApi("/api/health/un-acknowledge", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ error_key: errorKey }),
+            })
+          )
+        )
+        setActiveSuppressions(prev => prev.filter(s => !pendingReEnables.has(s.error_key)))
+        // Notify other components (dashboard health card) that the
+        // suppression set changed so they can refresh.
+        window.dispatchEvent(new CustomEvent("health-suppression-changed"))
+      }
+
+      setPendingChanges({})
+      setCustomValues({})
+      setPendingReEnables(new Set())
+      setHealthEditMode(false)
+      setSavedAllHealth(true)
+      setTimeout(() => setSavedAllHealth(false), 3000)
+    } catch (err) {
+      console.error("Failed to save health settings:", err)
+    } finally {
+      setSavingAllHealth(false)
+    }
+  }
+
+  const hasPendingChanges = pendingReEnables.size > 0 || Object.keys(pendingChanges).some(
+    k => pendingChanges[k] !== -2
+  )
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold">{t("settings.title")}</h1>
+        <p className="text-muted-foreground mt-2">{t("settings.description")}</p>
+      </div>
+
+      {/* Interface Language Settings */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Globe2 className="h-5 w-5 text-blue-500" />
+            <CardTitle>{t("settings.interfaceLanguage.title")}</CardTitle>
+          </div>
+          <CardDescription>{t("settings.interfaceLanguage.description")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium text-foreground">{t("settings.interfaceLanguage.label")}</div>
+              {/* Only render the note when the current locale actually has
+                  one. Human-curated locales (en/es/sv/sk) leave the value
+                  empty, so the visible line disappears entirely; the
+                  auto-translated locales (de/fr/it/pt) surface the
+                  Google Translate disclaimer. */}
+              {t("settings.interfaceLanguage.fallbackNote") && (
+                <p className="text-xs text-muted-foreground mt-1">{t("settings.interfaceLanguage.fallbackNote")}</p>
+              )}
+            </div>
+            <Select value={language} onValueChange={(value) => setLanguage(value as LanguageCode)}>
+              <SelectTrigger className="w-full sm:w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {SUPPORTED_LANGUAGES.map((item) => (
+                  <SelectItem key={item.code} value={item.code}>
+                    {item.nativeName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Navigation Tab Order — user-orderable top-level tabs */}
+      {!isPbs && <NavTabOrderCard />}
+
+      {/* Network Units Settings */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Ruler className="h-5 w-5 text-green-500" />
+              <CardTitle>{t("settings.networkUnits.title")}</CardTitle>
+            </div>
+            {!loadingUnitSettings && (
+              <div className="flex items-center gap-2">
+                {savedUnit && (
+                  <span className="flex items-center gap-1 text-xs text-green-500">
+                    <Check className="h-3.5 w-3.5" />
+                    {t("status.saved")}
+                  </span>
+                )}
+                {unitsEditMode ? (
+                  <>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors text-muted-foreground"
+                      onClick={handleCancelUnitsEdit}
+                    >
+                      {t("actions.cancel")}
+                    </button>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      onClick={handleSaveUnits}
+                      disabled={pendingUnit === null || pendingUnit === networkUnitSettings}
+                    >
+                      <Check className="h-3 w-3" />
+                      {t("actions.save")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors flex items-center gap-1.5"
+                    onClick={() => setUnitsEditMode(true)}
+                  >
+                    <Settings2 className="h-3 w-3" />
+                    {t("actions.edit")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <CardDescription>{t("settings.networkUnits.description")}</CardDescription>
+        </CardHeader>
+        <CardContent
+          className={
+            unitsEditMode
+              ? "bg-accent [&_input]:bg-background [&_textarea]:bg-background [&_[role=combobox]]:bg-background"
+              : undefined
+          }
+        >
+          {loadingUnitSettings ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin h-8 w-8 border-4 border-green-500 border-t-transparent rounded-full" />
+            </div>
+          ) : (
+            <div className="text-foreground flex items-center justify-between">
+              <div className="flex items-center">{t("settings.networkUnits.label")}</div>
+              <Select
+                value={pendingUnit ?? networkUnitSettings}
+                onValueChange={(v) => setPendingUnit(v as "Bytes" | "Bits")}
+                disabled={!unitsEditMode}
+              >
+                <SelectTrigger className={`w-28 h-8 text-xs ${!unitsEditMode ? "opacity-60" : ""}`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Bytes">{t("settings.networkUnits.bytes")}</SelectItem>
+                  <SelectItem value="Bits">{t("settings.networkUnits.bits")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Storage Display: group physical disks by controller */}
+      <StorageDisplayCard />
+
+      {/* Health Monitor Settings */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <HeartPulse className="h-5 w-5 text-red-500" />
+              <CardTitle>{t("settings.healthMonitor.title")}</CardTitle>
+            </div>
+            {!loadingHealth && (
+              <div className="flex items-center gap-2">
+                {savedAllHealth && (
+                  <span className="flex items-center gap-1 text-xs text-green-500">
+                    <Check className="h-3.5 w-3.5" />
+                    {t("status.saved")}
+                  </span>
+                )}
+                {healthEditMode ? (
+                  <>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors text-muted-foreground"
+                      onClick={handleCancelEdit}
+                      disabled={savingAllHealth}
+                    >
+                      {t("actions.cancel")}
+                    </button>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      onClick={handleSaveAllHealth}
+                      disabled={savingAllHealth || !hasPendingChanges}
+                    >
+                      {savingAllHealth ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      {t("actions.save")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors flex items-center gap-1.5"
+                    onClick={() => setHealthEditMode(true)}
+                  >
+                    <Settings2 className="h-3 w-3" />
+                    {t("actions.edit")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <CardDescription>
+            {t("settings.healthMonitor.description")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent
+          className={
+            healthEditMode
+              ? "bg-accent [&_input]:bg-background [&_textarea]:bg-background [&_[role=combobox]]:bg-background"
+              : undefined
+          }
+        >
+          {loadingHealth ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin h-8 w-8 border-4 border-red-500 border-t-transparent rounded-full" />
+            </div>
+          ) : (
+            <div className="space-y-0">
+              {/* Header */}
+              <div className="flex items-center justify-between pb-2 mb-1 border-b border-border">
+                <span className="text-xs font-medium text-muted-foreground">{t("settings.healthMonitor.category")}</span>
+                <span className="text-xs font-medium text-muted-foreground">{t("settings.healthMonitor.suppressionDuration")}</span>
+              </div>
+              
+              {/* Per-category rows */}
+              <div className="divide-y divide-border/50">
+                {suppressionCategories.filter(cat => !isPbs || healthCategoryKey(cat) !== "vms").map((cat) => {
+                  const IconComp = CATEGORY_ICONS[cat.icon] || HeartPulse
+                  const effectiveHours = getEffectiveHours(cat)
+                  const isCustomMode = effectiveHours === -2 || (cat.key in customValues)
+                  const isPermanent = effectiveHours === -1
+                  const isLong = effectiveHours >= 720 && effectiveHours !== -1 && effectiveHours !== -2
+                  const hasChanged = cat.key in pendingChanges && pendingChanges[cat.key] !== cat.hours
+                  const selectVal = isCustomMode ? "custom" : getSelectValue(effectiveHours, cat.key)
+                  const categoryKey = isPbs && healthCategoryKey(cat) === "services" ? "pbsServices" : healthCategoryKey(cat)
+                  const catLabel = tFallback(`settings.healthMonitor.categories.${categoryKey}`, cat.label)
+                  
+                  return (
+                    <div key={cat.key}>
+                      <div className="flex items-center justify-between gap-2 py-2 sm:py-2.5 px-1 sm:px-2">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <IconComp className="h-4 w-4 text-muted-foreground shrink-0" />
+                          <span className="text-xs sm:text-sm font-medium">{catLabel}</span>
+                          {hasChanged && healthEditMode && (
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-500 shrink-0" />
+                          )}
+                        </div>
+                        <div className="shrink-0">
+                          {isCustomMode && healthEditMode ? (
+                            <div className="flex items-center gap-1.5">
+                              <Input
+                                type="number"
+                                min={1}
+                                className="w-16 sm:w-20 h-7 text-xs"
+                                value={customValues[cat.key] || ""}
+                                onChange={(e) => setCustomValues(prev => ({ ...prev, [cat.key]: e.target.value }))}
+                                placeholder={t("settings.healthMonitor.hours")}
+                              />
+                              <span className="text-xs text-muted-foreground">h</span>
+                              <button
+                                className="h-7 px-2 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors"
+                                onClick={() => handleCustomConfirm(cat.key)}
+                              >
+                                OK
+                              </button>
+                              <button
+                                className="h-7 px-1.5 text-xs rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                                onClick={() => {
+                                  setCustomValues(prev => {
+                                    const next = { ...prev }
+                                    delete next[cat.key]
+                                    return next
+                                  })
+                                  setPendingChanges(prev => {
+                                    const next = { ...prev }
+                                    delete next[cat.key]
+                                    return next
+                                  })
+                                }}
+                              >
+                                X
+                              </button>
+                            </div>
+                          ) : (
+                            <Select
+                              value={selectVal}
+                              onValueChange={(v) => handleSuppressionChange(cat.key, v)}
+                              disabled={!healthEditMode}
+                            >
+                              <SelectTrigger className={`w-28 sm:w-32 h-7 text-xs ${!healthEditMode ? "opacity-60" : ""}`}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {SUPPRESSION_OPTIONS.map((opt) => (
+                                  <SelectItem key={opt.value} value={opt.value}>
+                                    {t(opt.labelKey)}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {/* Notice for Permanent */}
+                      {isPermanent && healthEditMode && (
+                        <div className="flex items-start gap-2 ml-6 sm:ml-8 mr-1 mb-2 p-2 rounded-md bg-blue-500/10 border border-blue-500/20">
+                          <Info className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-blue-400/90 leading-relaxed">
+                            {t("settings.healthMonitor.permanentNotice", { category: catLabel })}
+                            {cat.category === "temperature" && (
+                              <span className="block mt-0.5 text-blue-300/80">
+                                {t("settings.healthMonitor.temperatureSafetyNotice")}
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      )}
+                      
+                      {/* Notice for long duration (> 1 month) */}
+                      {isLong && healthEditMode && (
+                        <div className="flex items-start gap-2 ml-6 sm:ml-8 mr-1 mb-2 p-2 rounded-md bg-blue-500/10 border border-blue-500/20">
+                          <Info className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                          <p className="text-[11px] text-blue-400/90 leading-relaxed">
+                            {t("settings.healthMonitor.longSuppressionNotice")}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+              
+              {/* Info footer */}
+              <div className="flex items-start gap-2 mt-3 pt-3 border-t border-border">
+                <Info className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {t("settings.healthMonitor.footerNote")}
+                </p>
+              </div>
+
+              {/* Active Suppressions subsection.
+                  Lives inside the Health Monitor card (no separator).
+                  Surfaces every currently-dismissed alert (time-limited
+                  and permanent) with a Re-enable button gated by Edit
+                  mode. Permanent dismisses chosen from the dashboard
+                  "Dismiss → Permanently" dropdown can only be reverted
+                  here, so this is the audit log + un-dismiss UI for
+                  them. Time-limited dismisses (24h, 7d) are listed for
+                  visibility and can also be force-revived from here. */}
+              <div className="pt-8">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <BellOff className="h-4 w-4 text-amber-500" />
+                  <span className="text-sm font-medium">{t("settings.healthMonitor.activeSuppressions")}</span>
+                </div>
+                <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                  {t("settings.healthMonitor.activeSuppressionsDescription")}{" "}
+                  <span className="font-mono text-xs">{t("actions.edit")}</span>.
+                </p>
+                {loadingSuppressions ? (
+                  <div className="flex items-center justify-center py-4">
+                    <div className="animate-spin h-5 w-5 border-4 border-amber-500 border-t-transparent rounded-full" />
+                  </div>
+                ) : activeSuppressions.length === 0 ? (
+                  <div className="text-center py-4 text-sm text-muted-foreground">
+                    {t("settings.healthMonitor.noActiveSuppressions")}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {activeSuppressions.map((s) => {
+                      const remaining = s.suppression_remaining_hours
+                      const remainingLabel = s.permanent
+                        ? t("settings.healthMonitor.permanent")
+                        : remaining === undefined || remaining === null
+                          ? t("status.active")
+                          : remaining >= 24
+                            ? t("settings.healthMonitor.daysRemaining", { count: Math.round(remaining / 24) })
+                            : t("settings.healthMonitor.hoursRemaining", { count: Math.max(0, Math.round(remaining)) })
+                      const dismissedAtLabel = s.acknowledged_at
+                        ? new Date(s.acknowledged_at).toLocaleString()
+                        : ""
+                      const isQueued = pendingReEnables.has(s.error_key)
+                      return (
+                        <div
+                          key={s.error_key}
+                          className={`flex items-start sm:items-center justify-between gap-3 px-3 py-2.5 rounded-md border transition-colors ${
+                            isQueued
+                              ? "border-green-500/40 bg-green-500/5"
+                              : "border-border hover:bg-muted/30"
+                          }`}
+                        >
+                          <div className={`flex items-start gap-2 min-w-0 flex-1 ${isQueued ? "opacity-60" : ""}`}>
+                            {s.permanent ? (
+                              <Badge variant="outline" className="text-sm px-2 py-0.5 shrink-0 text-amber-400 border-amber-400/40 mt-0.5 font-normal">
+                                {t("settings.healthMonitor.permanent")}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-sm px-2 py-0.5 shrink-0 text-blue-400 border-blue-400/30 mt-0.5 font-normal">
+                                {remainingLabel}
+                              </Badge>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className={`text-xs sm:text-sm font-medium text-foreground truncate ${isQueued ? "line-through" : ""}`} title={s.error_key}>
+                                {tFallback(`settings.healthMonitor.errorNames.${s.error_key}`, normalizeErrorKey(s.error_key))}
+                              </div>
+                              <div className="text-sm text-muted-foreground flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                                <span>{t("settings.healthMonitor.labels.category")}: <span className="font-medium text-foreground/80">{s.category ? tFallback(`settings.healthMonitor.categories.${s.category}`, s.category) : "—"}</span></span>
+                                {s.severity && <span>{t("settings.healthMonitor.labels.severity")}: <span className="font-medium text-foreground/80">{tFallback(`status.${s.severity.toLowerCase()}`, s.severity)}</span></span>}
+                                {dismissedAtLabel && <span>{t("settings.healthMonitor.labels.dismissed")}: {dismissedAtLabel}</span>}
+                              </div>
+                            </div>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className={`h-7 px-2.5 text-xs shrink-0 bg-transparent ${
+                              isQueued
+                                ? "border-green-500/50 text-green-400 hover:bg-green-500/10"
+                                : "hover:bg-green-500/10 hover:border-green-500/50"
+                            }`}
+                            disabled={!healthEditMode || savingAllHealth}
+                            onClick={() => handleReEnable(s.error_key)}
+                            title={
+                              !healthEditMode
+                                ? t("settings.healthMonitor.reEnableDisabledTitle")
+                                : isQueued
+                                  ? t("settings.healthMonitor.reEnableQueuedTitle")
+                                  : t("settings.healthMonitor.reEnableTitle")
+                            }
+                          >
+                            {isQueued ? t("actions.undo") : t("settings.healthMonitor.reEnable")}
+                          </Button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {!isPbs && <>
+      {/* Remote Storage Exclusions */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-purple-500" />
+              <CardTitle>{t("settings.remoteStorage.title")}</CardTitle>
+            </div>
+            {!loadingStorages && remoteStorages.length > 0 && (
+              <div className="flex items-center gap-2">
+                {savedStorages && (
+                  <span className="flex items-center gap-1 text-xs text-green-500">
+                    <Check className="h-3.5 w-3.5" />
+                    {t("status.saved")}
+                  </span>
+                )}
+                {storagesEditMode ? (
+                  <>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors text-muted-foreground"
+                      onClick={handleCancelStoragesEdit}
+                      disabled={savingStorages}
+                    >
+                      {t("actions.cancel")}
+                    </button>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      onClick={handleSaveStorages}
+                      disabled={savingStorages || pendingStorages.size === 0}
+                    >
+                      {savingStorages ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      {t("actions.save")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors flex items-center gap-1.5"
+                    onClick={() => setStoragesEditMode(true)}
+                  >
+                    <Settings2 className="h-3 w-3" />
+                    {t("actions.edit")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <CardDescription>
+            {t("settings.remoteStorage.description")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent
+          className={
+            storagesEditMode
+              ? "bg-accent [&_input]:bg-background [&_textarea]:bg-background [&_[role=combobox]]:bg-background"
+              : undefined
+          }
+        >
+          {loadingStorages ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin h-8 w-8 border-4 border-purple-500 border-t-transparent rounded-full" />
+            </div>
+          ) : remoteStorages.length === 0 ? (
+            <div className="text-center py-8">
+              <CloudOff className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+              <p className="text-muted-foreground">{t("settings.remoteStorage.emptyTitle")}</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                {t("settings.remoteStorage.emptyDescription")}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-0">
+              {/* Header */}
+              <div className="grid grid-cols-[1fr_auto_auto] gap-4 pb-2 mb-1 border-b border-border">
+                <span className="text-xs font-medium text-muted-foreground">{t("settings.remoteStorage.storage")}</span>
+                <span className="text-xs font-medium text-muted-foreground text-center w-20">{t("settings.common.health")}</span>
+                <span className="text-xs font-medium text-muted-foreground text-center w-20">{t("settings.common.alerts")}</span>
+              </div>
+              
+              {/* Storage rows - scrollable container */}
+              <div className="max-h-[320px] overflow-y-auto divide-y divide-border/50">
+                {remoteStorages.map((storage) => {
+                  const isExcluded = storage.exclude_health || storage.exclude_notifications
+                  const isSaving = savingStorage === storage.name
+                  const isNamespaceRestricted = storage.status === 'namespace_restricted'
+                  const isOffline = !isNamespaceRestricted && storage.status !== 'active'
+                  const capacityKnown = storage.capacity_known ?? storage.total > 0
+
+                  return (
+                    <div key={storage.name} className="grid grid-cols-[1fr_auto_auto] gap-4 py-3 items-center">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${
+                          isOffline ? 'bg-red-500' : isNamespaceRestricted ? 'bg-blue-400' : 'bg-green-500'
+                        }`} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium truncate">{storage.name}</span>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                              {storage.type}
+                            </Badge>
+                          </div>
+                          {isOffline && (
+                            <p className="text-[11px] text-red-400 mt-0.5">{t("settings.remoteStorage.offline")}</p>
+                          )}
+                          {isNamespaceRestricted && (
+                            <p className="text-[11px] text-blue-400 mt-0.5">{t("settings.remoteStorage.namespaceRestricted")}</p>
+                          )}
+                          {!isOffline && !isNamespaceRestricted && !capacityKnown && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5">{t("storage.capacityNotReported")}</p>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {(() => {
+                        // Resolve the visible checked state from the pending
+                        // map first (unsaved local change) or fall back to
+                        // the storage's persisted value.
+                        const p = pendingStorages.get(storage.name)
+                        const excludeHealth = p ? p.exclude_health : storage.exclude_health
+                        const excludeNotif  = p ? p.exclude_notifications : storage.exclude_notifications
+                        return (
+                          <>
+                            <div className="flex items-center justify-center w-20">
+                              {isSaving ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Switch
+                                  checked={!excludeHealth}
+                                  disabled={!storagesEditMode}
+                                  onCheckedChange={(checked) => {
+                                    setPendingStorages(m => {
+                                      const next = new Map(m)
+                                      next.set(storage.name, { exclude_health: !checked, exclude_notifications: excludeNotif })
+                                      return next
+                                    })
+                                  }}
+                                  className={`data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-input border border-border ${!storagesEditMode ? "opacity-60" : ""}`}
+                                />
+                              )}
+                            </div>
+                            <div className="flex items-center justify-center w-20">
+                              {isSaving ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Switch
+                                  checked={!excludeNotif}
+                                  disabled={!storagesEditMode}
+                                  onCheckedChange={(checked) => {
+                                    setPendingStorages(m => {
+                                      const next = new Map(m)
+                                      next.set(storage.name, { exclude_health: excludeHealth, exclude_notifications: !checked })
+                                      return next
+                                    })
+                                  }}
+                                  className={`data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-input border border-border ${!storagesEditMode ? "opacity-60" : ""}`}
+                                />
+                              )}
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )
+                })}
+              </div>
+              
+              {/* Info footer */}
+              <div className="flex items-start gap-2 mt-3 pt-3 border-t border-border">
+                <Info className="h-3.5 w-3.5 text-purple-400 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  <strong>{t("settings.common.health")}:</strong> {t("settings.remoteStorage.healthHelp")}
+                  <br />
+                  <strong>{t("settings.common.alerts")}:</strong> {t("settings.remoteStorage.alertsHelp")}
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      </>}
+
+      {/* Network Interface Exclusions */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Network className="h-5 w-5 text-blue-500" />
+              <CardTitle>{t("settings.networkInterfaces.title")}</CardTitle>
+            </div>
+            {!loadingInterfaces && networkInterfaces.length > 0 && (
+              <div className="flex items-center gap-2">
+                {savedInterfaces && (
+                  <span className="flex items-center gap-1 text-xs text-green-500">
+                    <Check className="h-3.5 w-3.5" />
+                    {t("status.saved")}
+                  </span>
+                )}
+                {interfacesEditMode ? (
+                  <>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors text-muted-foreground"
+                      onClick={handleCancelInterfacesEdit}
+                      disabled={savingInterfaces}
+                    >
+                      {t("actions.cancel")}
+                    </button>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      onClick={handleSaveInterfaces}
+                      disabled={savingInterfaces || pendingInterfaces.size === 0}
+                    >
+                      {savingInterfaces ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Check className="h-3 w-3" />
+                      )}
+                      {t("actions.save")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors flex items-center gap-1.5"
+                    onClick={() => setInterfacesEditMode(true)}
+                  >
+                    <Settings2 className="h-3 w-3" />
+                    {t("actions.edit")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <CardDescription>
+            {t("settings.networkInterfaces.description")}
+          </CardDescription>
+        </CardHeader>
+        <CardContent
+          className={
+            interfacesEditMode
+              ? "bg-accent [&_input]:bg-background [&_textarea]:bg-background [&_[role=combobox]]:bg-background"
+              : undefined
+          }
+        >
+          {loadingInterfaces ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" />
+            </div>
+          ) : networkInterfaces.length === 0 ? (
+            <div className="text-center py-8">
+              <Network className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+              <p className="text-muted-foreground">{t("settings.networkInterfaces.emptyTitle")}</p>
+            </div>
+          ) : (
+            <div className="space-y-0">
+              {/* Header */}
+              <div className="grid grid-cols-[1fr_auto_auto] gap-4 pb-2 mb-1 border-b border-border">
+                <span className="text-xs font-medium text-muted-foreground">{t("settings.networkInterfaces.interface")}</span>
+                <span className="text-xs font-medium text-muted-foreground text-center w-20">{t("settings.common.health")}</span>
+                <span className="text-xs font-medium text-muted-foreground text-center w-20">{t("settings.common.alerts")}</span>
+              </div>
+              
+              {/* Interface rows - scrollable container */}
+              <div className="max-h-[320px] overflow-y-auto divide-y divide-border/50">
+                {networkInterfaces.map((iface) => {
+                  const isExcluded = iface.exclude_health || iface.exclude_notifications
+                  const isSaving = savingInterface === iface.name
+                  const isDown = !iface.is_up
+                  
+                  return (
+                    <div key={iface.name} className="grid grid-cols-[1fr_auto_auto] gap-4 py-3 items-center">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-2 h-2 rounded-full shrink-0 ${
+                          isDown ? 'bg-red-500' : 'bg-green-500'
+                        }`} />
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className={`font-medium truncate ${isExcluded ? 'text-muted-foreground' : ''}`}>
+                              {iface.name}
+                            </span>
+                            <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                              {interfaceTypeLabel(iface.type)}
+                            </Badge>
+                            {isDown && !isExcluded && (
+                              <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                {t("settings.networkInterfaces.down")}
+                              </Badge>
+                            )}
+                            {isExcluded && (
+                              <Badge variant="secondary" className="text-[10px] px-1.5 py-0 bg-blue-500/10 text-blue-400">
+                                {t("settings.networkInterfaces.excluded")}
+                              </Badge>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground">
+                            {iface.ip_address || t("settings.networkInterfaces.noIp")} {iface.speed > 0 ? `- ${iface.speed} Mbps` : ''}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {(() => {
+                        const p = pendingInterfaces.get(iface.name)
+                        const excludeHealth = p ? p.exclude_health : iface.exclude_health
+                        const excludeNotif  = p ? p.exclude_notifications : iface.exclude_notifications
+                        return (
+                          <>
+                            {/* Health toggle */}
+                            <div className="flex justify-center w-20">
+                              {isSaving ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Switch
+                                  checked={!excludeHealth}
+                                  disabled={!interfacesEditMode}
+                                  onCheckedChange={(checked) => {
+                                    setPendingInterfaces(m => {
+                                      const next = new Map(m)
+                                      next.set(iface.name, { exclude_health: !checked, exclude_notifications: excludeNotif })
+                                      return next
+                                    })
+                                  }}
+                                  className={`data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-input border border-border ${!interfacesEditMode ? "opacity-60" : ""}`}
+                                />
+                              )}
+                            </div>
+
+                            {/* Notifications toggle */}
+                            <div className="flex justify-center w-20">
+                              {isSaving ? (
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              ) : (
+                                <Switch
+                                  checked={!excludeNotif}
+                                  disabled={!interfacesEditMode}
+                                  onCheckedChange={(checked) => {
+                                    setPendingInterfaces(m => {
+                                      const next = new Map(m)
+                                      next.set(iface.name, { exclude_health: excludeHealth, exclude_notifications: !checked })
+                                      return next
+                                    })
+                                  }}
+                                  className={`data-[state=checked]:bg-blue-600 data-[state=unchecked]:bg-input border border-border ${!interfacesEditMode ? "opacity-60" : ""}`}
+                                />
+                              )}
+                            </div>
+                          </>
+                        )
+                      })()}
+                    </div>
+                  )
+                })}
+              </div>
+              
+              {/* Info footer */}
+              <div className="flex items-start gap-2 mt-3 pt-3 border-t border-border">
+                <Info className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  <strong>{t("settings.common.health")}:</strong> {t("settings.networkInterfaces.healthHelp")}
+                  <br />
+                  <strong>{t("settings.common.alerts")}:</strong> {t("settings.networkInterfaces.alertsHelp")}
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <DiskExclusions />
+
+      {/* Health Monitor Thresholds — placed above Notifications because the
+          values configured here drive what triggers the notifications below. */}
+      <HealthThresholds />
+
+      {/* LXC Update Detection — gates the per-CT apt/apk scan. When OFF,
+          the matching toggle in NotificationSettings is hidden (the
+          preference is preserved in the DB and reappears when detection
+          is re-enabled). */}
+      {!isPbs && <LxcUpdateDetection />}
+
+      {!isPbs && <>
+      {/* GitHub API — optional authentication for app upstream checks. */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <Github className="h-5 w-5 text-foreground" />
+              <CardTitle>{t("settings.githubApi.title")}</CardTitle>
+            </div>
+            {!githubTokenLoading && (
+              <div className="flex items-center gap-2">
+                {githubTokenSaved && (
+                  <span className="flex items-center gap-1 text-xs text-green-500">
+                    <Check className="h-3.5 w-3.5" />
+                    {t("status.saved")}
+                  </span>
+                )}
+                {githubTokenEditMode ? (
+                  <>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors text-muted-foreground"
+                      onClick={() => {
+                        setGithubTokenDraft("")
+                        setGithubTokenError("")
+                        setGithubTokenEditMode(false)
+                      }}
+                      disabled={githubTokenSaving}
+                    >
+                      {t("actions.cancel")}
+                    </button>
+                    <button
+                      className="h-7 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-700 text-white transition-colors disabled:opacity-50 flex items-center gap-1.5"
+                      onClick={saveGithubToken}
+                      disabled={githubTokenSaving || !githubTokenDraft.trim()}
+                    >
+                      {githubTokenSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                      {t("actions.save")}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    className="h-7 px-3 text-xs rounded-md border border-border bg-background hover:bg-muted transition-colors flex items-center gap-1.5"
+                    onClick={() => {
+                      setGithubTokenError("")
+                      setGithubTokenEditMode(true)
+                    }}
+                  >
+                    <Settings2 className="h-3 w-3" />
+                    {githubTokenConfigured ? t("actions.edit") : t("settings.githubApi.configure")}
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <CardDescription>{t("settings.githubApi.description")}</CardDescription>
+        </CardHeader>
+        <CardContent className={githubTokenEditMode ? "bg-accent [&_input]:bg-background" : undefined}>
+          {githubTokenLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : githubTokenEditMode ? (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <label htmlFor="github-api-token" className="text-sm font-medium text-foreground">
+                  {t("settings.githubApi.tokenLabel")}
+                </label>
+                <Input
+                  id="github-api-token"
+                  type="password"
+                  autoComplete="new-password"
+                  value={githubTokenDraft}
+                  onChange={(event) => setGithubTokenDraft(event.target.value)}
+                  placeholder={githubTokenConfigured ? "••••••••••••" : t("settings.githubApi.tokenPlaceholder")}
+                  disabled={githubTokenSaving}
+                />
+                <p className="text-xs text-muted-foreground">{t("settings.githubApi.tokenHelp")}</p>
+              </div>
+              {githubTokenConfigured && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-500/40 text-red-400 hover:bg-red-500/10 hover:text-red-300"
+                  onClick={removeGithubToken}
+                  disabled={githubTokenSaving}
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  {t("settings.githubApi.removeToken")}
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 text-sm">
+              <span className={`h-2 w-2 rounded-full ${githubTokenConfigured ? "bg-green-500" : "bg-muted-foreground/60"}`} />
+              <span className={githubTokenConfigured ? "text-green-500" : "text-muted-foreground"}>
+                {githubTokenConfigured ? t("settings.githubApi.configured") : t("settings.githubApi.notConfigured")}
+              </span>
+            </div>
+          )}
+          {githubTokenError && (
+            <div className="mt-3 flex items-start gap-2 text-sm text-red-400">
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{githubTokenError}</span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+      </>}
+
+      {/* Notification Settings (PVE only for now) */}
+      {!isPbs && <NotificationSettings />}
+
+      {/* Issue #195: snippets storage selector. Only renders when more
+          than one storage advertises content=snippets — on a typical
+          standalone host with just `local` there's nothing to choose,
+          so showing an empty selector would be noise. */}
+      {!isPbs && snippetsCandidates.length > 1 && (
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-cyan-500" />
+              <CardTitle>{t("settings.snippets.title")}</CardTitle>
+            </div>
+            <CardDescription>
+              {t("settings.snippets.description")}{" "}
+              <code className="mx-1">local</code>
+              {" "}{t("settings.snippets.localNote")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-col md:flex-row md:items-center gap-3">
+              <Select value={snippetsStorage || ""} onValueChange={saveSnippetsStorage} disabled={snippetsSaving}>
+                <SelectTrigger className="w-full md:w-72">
+                  <SelectValue placeholder={t("settings.snippets.placeholder")} />
+                </SelectTrigger>
+                <SelectContent>
+                  {snippetsCandidates.map(c => (
+                    <SelectItem key={c.name} value={c.name} disabled={!c.active}>
+                      {c.name}
+                      <span className="ml-2 text-xs text-muted-foreground">
+                         {c.type}{!c.active && ` · ${t("status.inactive")}`}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {snippetsSaving && (
+                <span className="text-xs text-muted-foreground inline-flex items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                   {t("status.saving")}
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground mt-3">
+               {t("settings.snippets.footer")}
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* ProxMenux Optimizations */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-orange-500" />
+            <CardTitle>{t("settings.optimizations.title")}</CardTitle>
+          </div>
+          <CardDescription>{t("settings.optimizations.description")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loadingTools ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin h-8 w-8 border-4 border-orange-500 border-t-transparent rounded-full" />
+            </div>
+          ) : proxmenuxTools.length === 0 ? (
+            <div className="text-center py-8">
+              <Package className="h-12 w-12 text-muted-foreground mx-auto mb-3 opacity-50" />
+              <p className="text-muted-foreground">{t("settings.optimizations.emptyTitle")}</p>
+              <p className="text-sm text-muted-foreground mt-1">{t("settings.optimizations.emptyDescription")}</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between mb-4 pb-2 border-b border-border">
+                <span className="text-sm font-medium text-muted-foreground">{t("settings.optimizations.installedTools")}</span>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-orange-500">{t("settings.optimizations.activeCount", { count: proxmenuxTools.length })}</span>
+                  {/* Sprint 12B: count badge that doubles as the trigger
+                      for the multi-select update modal. Only shown when
+                      at least one tool has an available update. */}
+                  {updatesAvailableCount > 0 && (
+                    <button
+                      onClick={() => {
+                        // Sprint 12B v2: pre-select every available
+                        // update. The user clicks the badge already
+                        // intending to apply them — defaulting to all
+                        // saves a tick when the common case is "update
+                        // everything".
+                        const initial = new Set<string>(
+                          proxmenuxTools.filter(t => t.has_update).map(t => t.key)
+                        )
+                        setSelectedUpdates(initial)
+                        setUpdateModalOpen(true)
+                      }}
+                      className="flex items-center gap-1.5 text-xs font-semibold text-purple-300 bg-purple-500/15 border border-purple-500/40 hover:bg-purple-500/25 transition-colors rounded-full px-3 py-1"
+                      title={t("settings.optimizations.viewUpdates")}
+                    >
+                      <Sparkles className="h-3.5 w-3.5" />
+                      {t("settings.optimizations.updateCount", { count: updatesAvailableCount })}
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {proxmenuxTools.map((tool) => {
+                  const clickable = !!tool.has_source
+                  const isDeprecated = !!tool.deprecated
+                  // Sprint 12B: the card turns purple-tinted when an
+                  // update is available — replaces the normal muted
+                  // styling so the user sees at a glance which tools
+                  // need attention. Click on the body still opens the
+                  // source viewer; the small ArrowUpCircle on the right
+                  // is the dedicated update trigger.
+                  const hasUpdate = !!tool.has_update
+                  const baseClasses = hasUpdate
+                    ? 'border-purple-500/40 bg-purple-500/10 hover:bg-purple-500/20 hover:border-purple-500/60'
+                    : 'bg-muted/50 border-border hover:bg-muted hover:border-orange-500/40'
+                  return (
+                    <div
+                      key={tool.key}
+                      onClick={clickable ? () => viewToolSource(tool) : undefined}
+                      className={`flex items-center justify-between gap-2 p-3 rounded-lg border transition-colors ${baseClasses} ${clickable ? 'cursor-pointer' : ''}`}
+                      title={clickable ? (isDeprecated ? t("settings.optimizations.legacySourceTitle") : t("settings.optimizations.sourceTitle")) : undefined}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
+                          hasUpdate ? 'bg-purple-400' : (isDeprecated ? 'bg-amber-500' : 'bg-green-500')
+                        }`} />
+                        <span className="text-sm font-medium truncate">{optimizationToolName(tool.key, tool.name, t)}</span>
+                        {isDeprecated && (
+                          <span className="text-[9px] uppercase tracking-wider text-amber-500 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded flex-shrink-0">
+                            {t("settings.optimizations.legacy")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {hasUpdate ? (
+                          <>
+                            <span className="text-[10px] text-purple-300 bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.5 rounded font-mono">
+                              v{tool.version || '1.0'} → v{tool.available_version || '?'}
+                            </span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleSingleToolUpdate(tool) }}
+                              className="text-purple-300 hover:text-purple-200 transition-colors"
+                              title={t("settings.optimizations.updateToolTitle", { name: optimizationToolName(tool.key, tool.name, t), version: tool.available_version || "?" })}
+                            >
+                              <ArrowUpCircle className="h-4 w-4" />
+                            </button>
+                          </>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded font-mono">v{tool.version || '1.0'}</span>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Code Viewer Modal */}
+      {codeModal.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ margin: 0 }} onClick={closeCodeModal}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col"
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("settings.optimizations.sourceDialogTitle", { name: optimizationSourceName(codeModal.toolKey, codeModal.toolName, t) })}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3 min-w-0">
+                <Code className={`h-5 w-5 flex-shrink-0 ${codeModal.deprecated ? 'text-amber-500' : 'text-orange-500'}`} />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-semibold truncate">{optimizationSourceName(codeModal.toolKey, codeModal.toolName, t)}</h3>
+                    {codeModal.deprecated && (
+                      <span className="text-[9px] uppercase tracking-wider text-amber-500 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded flex-shrink-0">
+                        {t("settings.optimizations.legacy")}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {codeModal.functionName && <span className="font-mono">{codeModal.functionName}()</span>}
+                    {codeModal.script && <span> — {codeModal.script}</span>}
+                    {/* Sprint 12B v2: when an update is pending the user
+                        sees `v1.0 → v1.1` so the source viewer matches
+                        the badge in the card. When no update, just the
+                        single installed version. */}
+                    {codeModal.version && codeModal.availableVersion && codeModal.availableVersion !== codeModal.version ? (
+                      <span className="ml-2 bg-purple-500/15 text-purple-300 border border-purple-500/30 px-1.5 py-0.5 rounded font-mono">
+                        v{codeModal.version} → v{codeModal.availableVersion}
+                      </span>
+                    ) : codeModal.version ? (
+                      <span className="ml-2 bg-muted px-1.5 py-0.5 rounded font-mono">v{codeModal.version}</span>
+                    ) : null}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {codeModal.source && (
+                  <button
+                    onClick={copySourceCode}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-muted hover:bg-muted/80 transition-colors"
+                    title={t("actions.copyToClipboard")}
+                  >
+                    {codeCopied ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    {codeCopied ? t("actions.copied") : t("actions.copy")}
+                  </button>
+                )}
+                <button
+                  onClick={closeCodeModal}
+                  aria-label={t("actions.close")}
+                  className="p-1.5 rounded-md hover:bg-muted transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            {/* Body */}
+            <div className="flex-1 overflow-auto p-0">
+              {codeModal.loading ? (
+                <div className="flex items-center justify-center py-16" role="status" aria-label={t("settings.optimizations.sourceLoading")}>
+                  <div className="animate-spin h-8 w-8 border-4 border-orange-500 border-t-transparent rounded-full" />
+                </div>
+              ) : codeModal.error ? (
+                <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+                  <Code className="h-10 w-10 mb-3 opacity-40" />
+                  <p className="text-sm" role="alert">{optimizationSourceError(codeModal.error, t)}</p>
+                </div>
+              ) : (
+                <pre
+                  className="text-xs leading-relaxed font-mono p-4 overflow-x-auto whitespace-pre bg-[#0d1117] text-[#e6edf3]"
+                  style={{ tabSize: 4 }}
+                  dangerouslySetInnerHTML={{ __html: `<code>${highlightBash(codeModal.source)}</code>` }}
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sprint 12B: multi-select Update modal — opened from the
+          "X updates" badge in the Optimizations card header. The user
+          ticks the tools they want to update, hits Update Selected,
+          and the wrapper script runs them all in one terminal session. */}
+      {updateModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setUpdateModalOpen(false)}>
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+          <div
+            className="relative bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <Sparkles className="h-5 w-5 text-purple-400" />
+                <div>
+                  <h3 className="text-sm font-semibold">{t("settings.optimizations.availableUpdates")}</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {t("settings.optimizations.availableUpdatesDescription", { count: updatesAvailableCount })}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setUpdateModalOpen(false)}
+                className="p-1.5 rounded-md hover:bg-muted transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-4 space-y-2">
+              {/* Sprint 12B v2: every row is selectable. Legacy bool
+                  entries (no recorded source) default to the auto flow
+                  on update — the previous "pick source first" path
+                  required an extra click for what is in practice always
+                  the same answer. */}
+              {proxmenuxTools.filter(t => t.has_update).map(tool => {
+                const isSelected = selectedUpdates.has(tool.key)
+                return (
+                  <label
+                    key={tool.key}
+                    className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                      isSelected
+                        ? 'border-purple-500/50 bg-purple-500/10'
+                        : 'border-border bg-muted/40 hover:bg-muted/60'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={(e) => {
+                        const next = new Set(selectedUpdates)
+                        if (e.target.checked) next.add(tool.key); else next.delete(tool.key)
+                        setSelectedUpdates(next)
+                      }}
+                      className="mt-1 h-4 w-4 accent-purple-500 cursor-pointer"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-medium">{optimizationToolName(tool.key, tool.name, t)}</span>
+                        <span className="text-[10px] text-purple-300 bg-purple-500/15 border border-purple-500/30 px-1.5 py-0.5 rounded font-mono">
+                          v{tool.version || '1.0'} → v{tool.available_version || '?'}
+                        </span>
+                      </div>
+                      {tool.description && (
+                        <p className="text-xs text-muted-foreground mt-1 leading-snug">{optimizationDescription(tool.description, t)}</p>
+                      )}
+                    </div>
+                  </label>
+                )
+              })}
+            </div>
+
+            <div className="flex items-center justify-between p-4 border-t border-border">
+              <span className="text-xs text-muted-foreground">
+                {t("settings.optimizations.selectedCount", { selected: selectedUpdates.size, total: updatesAvailableCount })}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setUpdateModalOpen(false)}
+                  className="px-4 py-1.5 text-xs rounded-md bg-muted hover:bg-muted/80 transition-colors"
+                >
+                  {t("actions.cancel")}
+                </button>
+                <button
+                  disabled={selectedUpdates.size === 0}
+                  onClick={() => {
+                    const entries = proxmenuxTools
+                      .filter(t => selectedUpdates.has(t.key))
+                      .map(t => {
+                        const source = resolveEffectiveSource(t)
+                        return {
+                          source,
+                          function: deriveFunctionName(t, source),
+                          key: t.key,
+                          name: t.name,
+                        }
+                      })
+                      .filter(e => !!e.function)
+                    setUpdateModalOpen(false)
+                    setSelectedUpdates(new Set())
+                    runPostInstallUpdates(entries)
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-1.5 text-xs font-medium rounded-md bg-purple-500 hover:bg-purple-600 text-white transition-colors disabled:bg-muted disabled:text-muted-foreground disabled:cursor-not-allowed"
+                >
+                  <ArrowUpCircle className="h-3.5 w-3.5" />
+                  {t("settings.optimizations.updateSelected")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sprint 12B: terminal that runs the update_post_install_function.sh
+          wrapper. The wrapper sources the chosen flow script and invokes
+          one or many functions in sequence (FUNCTIONS_BATCH). On close
+          we refresh the tools list so the new versions show up. */}
+      {updateTerminal?.open && (
+        <ScriptTerminalModal
+          open={updateTerminal.open}
+          onClose={closeUpdateTerminal}
+          scriptPath="/usr/local/share/proxmenux/scripts/post_install/update_post_install_function.sh"
+          scriptName="update_post_install_function"
+          title={updateTerminal.title}
+          description={updateTerminal.description}
+          params={updateTerminal.params}
+        />
+      )}
+    </div>
+  )
+}

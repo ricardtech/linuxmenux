@@ -1,0 +1,967 @@
+"use client"
+
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
+import useSWR from "swr"
+import { Badge } from "./ui/badge"
+import { Button } from "./ui/button"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
+import { SystemOverview } from "./system-overview"
+import { StorageOverview } from "./storage-overview"
+import { NetworkMetrics } from "./network-metrics"
+import { VirtualMachines } from "./virtual-machines"
+import { AppsDashboard } from "./apps-dashboard"
+import Hardware from "./hardware"
+import { SystemLogs } from "./system-logs"
+import { AuditReport } from "./audit-report"
+import { Settings } from "./settings"
+import { Security } from "./security"
+import { Profile } from "./profile"
+import { About } from "./about"
+import { BackupTab } from "./backup-tab"
+import { PBSPanel } from "./pbs-panel"
+import { MonitorSwitcher } from "./monitor-switcher"
+import { OnboardingCarousel } from "./onboarding-carousel"
+import { HealthStatusModal } from "./health-status-modal"
+import { ReleaseNotesModal, useVersionCheck } from "./release-notes-modal"
+import { getApiUrl, fetchApi } from "../lib/api-config"
+import { TerminalPanel } from "./terminal-panel"
+import { AvatarMenu } from "./avatar-menu"
+import {
+  RefreshCw,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  Server,
+  ListChecks,
+  Menu,
+  LayoutDashboard,
+  HardDrive,
+  NetworkIcon,
+  Boxes,
+  Grid3x3,
+  Cpu,
+  ScrollText,
+  SettingsIcon,
+  Settings2,
+  Terminal,
+  ShieldCheck,
+  ClipboardCheck,
+  Info,
+  DatabaseBackup,
+  Database,
+  ChevronDown,
+  Clock,
+} from "lucide-react"
+import Image from "next/image"
+import { ThemeToggle } from "./theme-toggle"
+import { Sheet, SheetContent, SheetTrigger } from "./ui/sheet"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu"
+import { useT } from "../lib/i18n/provider"
+import { APP_VERSION } from "../lib/version"
+import { useTabOrder, firstActualTab, type TabId } from "../lib/tab-order"
+
+interface SystemStatus {
+  status: "healthy" | "warning" | "critical"
+  uptime: string
+  lastUpdate: string
+  serverName: string
+  nodeId: string
+}
+
+interface FlaskSystemData {
+  hostname: string
+  node_id: string
+  uptime: string
+  cpu_usage: number
+  memory_usage: number
+  temperature: number
+  load_average: number[]
+}
+
+interface FlaskSystemInfo {
+  hostname: string
+  node_id: string
+  uptime: string
+  health: {
+    status: "healthy" | "warning" | "critical"
+  }
+}
+
+// Prefetch on dashboard mount: SWR caches by key across all
+// `useSWR` calls, so firing these here means the Apps tab finds the
+// data already resolved when it opens. Without this, the tab pays a
+// visible roundtrip on first render because VirtualMachines has been
+// warming /api/vms since page load but nobody was warming the custom
+// links endpoint.
+const _dashboardPrefetchFetcher = (url: string) => fetchApi(url)
+
+export function ProxmoxDashboard() {
+  const t = useT()
+  const { data, error } = useSWR<{ product: string }>("/api/platform", url => fetchApi<{ product: string }>(url), { revalidateOnFocus: false })
+  if (!data && !error) return <p role="status" className="p-8">{t("app.loading")}</p>
+  if (data?.product === "pbs") return <PBSDashboard />
+  return <PVEDashboard />
+}
+
+function PVEDashboard() {
+  return <MonitorDashboard product="pve" />
+}
+
+function PBSDashboard() {
+  return <MonitorDashboard product="pbs" />
+}
+
+type Product = "pve" | "pbs"
+type TopTab = TabId | "datastores" | "pbs-tasks"
+
+// Proxmox Backup Server has no guests, apps or PVE storage: it keeps the
+// same header, health and administration with its own top-level sections.
+const PBS_TABS: TopTab[] = ["overview", "datastores", "pbs-tasks", "terminal", "admin"]
+
+function MonitorDashboard({ product }: { product: Product }) {
+  const t = useT()
+  const isPbs = product === "pbs"
+  useSWR(isPbs ? null : "/api/apps/custom-links", _dashboardPrefetchFetcher, { revalidateOnFocus: false })
+  useSWR(isPbs ? null : "/api/apps/categories",   _dashboardPrefetchFetcher, { revalidateOnFocus: false })
+  const { order: userTabOrder } = useTabOrder()
+  const tabOrder: TopTab[] = isPbs ? PBS_TABS : userTabOrder
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({
+    status: "healthy",
+    uptime: "Loading...",
+    lastUpdate: new Date().toLocaleTimeString("en-US", { hour12: false }),
+    serverName: "Loading...",
+    nodeId: "Loading...",
+  })
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [isServerConnected, setIsServerConnected] = useState(true)
+  const [componentKey, setComponentKey] = useState(0)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState("overview")
+  // On first mount, land on whatever the user's custom order says is
+  // the leading tab. localStorage isn't available during SSR so this
+  // runs post-hydration; the tiny flash is acceptable and matches the
+  // pattern next-themes uses for the same reason.
+  useEffect(() => {
+    setActiveTab(isPbs ? "overview" : firstActualTab())
+  }, [isPbs])
+  const [infoCount, setInfoCount] = useState(0)
+  const [updateAvailable, setUpdateAvailable] = useState(false)
+  const [showNavigation, setShowNavigation] = useState(true)
+  const [lastScrollY, setLastScrollY] = useState(0)
+  const [showHealthModal, setShowHealthModal] = useState(false)
+  const { showReleaseNotes, setShowReleaseNotes } = useVersionCheck()
+  const displayServerName = systemStatus.serverName === "Loading..." ? t("app.loading") : systemStatus.serverName
+  const displayUptime = systemStatus.uptime === "Loading..." ? t("app.loading") : systemStatus.uptime || t("app.notAvailable")
+
+  // Category keys for health info count calculation
+  const HEALTH_CATEGORY_KEYS = [
+    { key: "cpu", category: "temperature" },
+    { key: "memory", category: "memory" },
+    { key: "storage", category: "storage" },
+    { key: "disks", category: "disks" },
+    { key: "network", category: "network" },
+    { key: "vms", category: "vms" },
+    { key: "services", category: "pve_services" },
+    { key: "logs", category: "logs" },
+    { key: "updates", category: "updates" },
+    { key: "security", category: "security" },
+  ]
+
+  // Fetch ProxMenux update status
+  const fetchUpdateStatus = useCallback(async () => {
+    try {
+      const response = await fetchApi("/api/proxmenux/update-status")
+      if (response?.success && response?.update_available) {
+        const { stable, beta } = response.update_available
+        setUpdateAvailable(stable || beta)
+      }
+    } catch (error) {
+      // Silently fail - updateAvailable will remain false
+    }
+  }, [])
+
+  const healthRequest = useRef<AbortController | null>(null)
+  // Fetch health info count independently (for initial load and refresh)
+  const fetchHealthInfoCount = useCallback(async (cachedOnly = false) => {
+    if (cachedOnly && healthRequest.current) return
+    healthRequest.current?.abort()
+    const controller = new AbortController()
+    healthRequest.current = controller
+    const timeout = cachedOnly ? setTimeout(() => controller.abort(), 10000) : undefined
+    try {
+      const response = await fetchApi(cachedOnly ? "/api/health/full?cached=1" : "/api/health/full", { signal: controller.signal })
+      if (healthRequest.current !== controller) return
+      if (!response?.health?.details) throw new Error("Invalid health snapshot")
+      let calculatedInfoCount = 0
+      
+      if (response && response.health?.details) {
+        // Get categories that have dismissed items (these become INFO)
+        const customCats = new Set((response.custom_suppressions || []).map((cs: { category: string }) => cs.category))
+        const filteredDismissed = (response.dismissed || []).filter((item: { category: string }) => !customCats.has(item.category))
+        const categoriesWithDismissed = new Set<string>()
+        filteredDismissed.forEach((item: { category: string }) => {
+          const catMeta = HEALTH_CATEGORY_KEYS.find(c => c.category === item.category || c.key === item.category)
+          if (catMeta) {
+            categoriesWithDismissed.add(catMeta.key)
+          }
+        })
+        
+        // Count effective INFO categories (original INFO + OK categories with dismissed)
+        HEALTH_CATEGORY_KEYS.forEach(({ key }) => {
+          const cat = response.health.details[key as keyof typeof response.health.details]
+          if (cat) {
+            const originalStatus = cat.status?.toUpperCase()
+            // Count as INFO if: originally INFO OR (originally OK and has dismissed items)
+            if (originalStatus === "INFO" || (originalStatus === "OK" && categoriesWithDismissed.has(key))) {
+              calculatedInfoCount++
+            }
+          }
+        })
+      }
+      
+      setInfoCount(calculatedInfoCount)
+    } catch (error) {
+      // Preserve the last known count; a failed poll is not a healthy result.
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout)
+      if (healthRequest.current === controller) healthRequest.current = null
+    }
+  }, [])
+
+  const fetchSystemData = useCallback(async () => {
+    try {
+      const data: FlaskSystemInfo = await fetchApi("/api/system-info")
+
+      const uptimeValue =
+        data.uptime && typeof data.uptime === "string" && data.uptime.trim() !== "" ? data.uptime : t("app.notAvailable")
+
+      const backendStatus = data.health?.status?.toUpperCase() || "OK"
+      let healthStatus: "healthy" | "warning" | "critical"
+
+      if (backendStatus === "CRITICAL") {
+        healthStatus = "critical"
+      } else if (backendStatus === "WARNING") {
+        healthStatus = "warning"
+      } else {
+        healthStatus = "healthy"
+      }
+
+      setSystemStatus({
+        status: healthStatus,
+        uptime: uptimeValue,
+        lastUpdate: new Date().toLocaleTimeString("en-US", { hour12: false }),
+        serverName: data.hostname || t("app.unknown"),
+        nodeId: data.node_id || t("app.unknown"),
+      })
+      setIsServerConnected(true)
+    } catch (error) {
+      // Expected to fail in v0 preview (no Flask server)
+
+      setIsServerConnected(false)
+      setSystemStatus((prev) => ({
+        ...prev,
+        status: "critical",
+        serverName: t("app.serverOffline"),
+        nodeId: t("app.serverOffline"),
+        uptime: t("app.notAvailable"),
+        lastUpdate: new Date().toLocaleTimeString("en-US", { hour12: false }),
+      }))
+    }
+  }, [t])
+
+  useEffect(() => {
+  // Siempre fetch inicial
+  fetchSystemData()
+  fetchHealthInfoCount()
+  fetchUpdateStatus()
+
+    // Header reboot information stays current on every tab, without full audits.
+    const refreshHealth = () => {
+      if (document.visibilityState === "visible") void fetchHealthInfoCount(true)
+    }
+    let interval: ReturnType<typeof setInterval> | null = null
+    let healthInterval: ReturnType<typeof setInterval> | null = null
+    if (activeTab === "overview") {
+      interval = setInterval(fetchSystemData, 30000) // 30 segundos
+    } else {
+      interval = setInterval(fetchSystemData, 60000) // 60 segundos
+    }
+
+    healthInterval = setInterval(refreshHealth, 30000)
+    window.addEventListener("focus", refreshHealth)
+    document.addEventListener("visibilitychange", refreshHealth)
+    return () => {
+      if (interval) clearInterval(interval)
+      if (healthInterval) clearInterval(healthInterval)
+      window.removeEventListener("focus", refreshHealth)
+      document.removeEventListener("visibilitychange", refreshHealth)
+      const controller = healthRequest.current
+      healthRequest.current = null
+      controller?.abort()
+    }
+  }, [fetchSystemData, fetchHealthInfoCount, fetchUpdateStatus, activeTab])
+
+  useEffect(() => {
+    const handleChangeTab = (event: CustomEvent) => {
+      const { tab } = event.detail
+      if (tab) {
+        setActiveTab(tab)
+      }
+    }
+
+    window.addEventListener("changeTab", handleChangeTab as EventListener)
+    return () => {
+      window.removeEventListener("changeTab", handleChangeTab as EventListener)
+    }
+  }, [])
+  
+  // Auto-refresh terminal on mobile devices
+  // This fixes the issue where terminal doesn't connect properly on mobile/VPN
+  useEffect(() => {
+    if (activeTab === "terminal") {
+      const isMobileDevice = window.innerWidth < 768 || 
+        ('ontouchstart' in window && navigator.maxTouchPoints > 0)
+      
+      if (isMobileDevice) {
+        // Delay to allow initial connection attempt, then refresh to ensure proper connection
+        const timeoutId = setTimeout(() => {
+          setComponentKey(prev => prev + 1)
+        }, 500)
+        
+        return () => clearTimeout(timeoutId)
+      }
+    }
+  }, [activeTab])
+
+  useEffect(() => {
+    const handleHealthStatusUpdate = (event: CustomEvent) => {
+      const { status, infoCount: newInfoCount } = event.detail
+      let healthStatus: "healthy" | "warning" | "critical"
+
+      if (status === "CRITICAL") {
+        healthStatus = "critical"
+      } else if (status === "WARNING") {
+        healthStatus = "warning"
+      } else {
+        healthStatus = "healthy"
+      }
+
+      setSystemStatus((prev) => ({
+        ...prev,
+        status: healthStatus,
+      }))
+      
+      // Update info count (INFO categories + dismissed items)
+      if (typeof newInfoCount === "number") {
+        setInfoCount(newInfoCount)
+      }
+    }
+
+    window.addEventListener("healthStatusUpdated", handleHealthStatusUpdate as EventListener)
+    return () => {
+      window.removeEventListener("healthStatusUpdated", handleHealthStatusUpdate as EventListener)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (
+      systemStatus.serverName &&
+      systemStatus.serverName !== "Loading..." &&
+      systemStatus.serverName !== t("app.serverOffline")
+    ) {
+      document.title = `${systemStatus.serverName} - ProxMenux Monitor`
+    } else {
+      document.title = "ProxMenux Monitor"
+    }
+  }, [systemStatus.serverName, t])
+
+  useEffect(() => {
+    let hideTimeout: ReturnType<typeof setTimeout> | null = null
+    let lastPosition = window.scrollY
+
+    const handleScroll = () => {
+      const currentScrollY = window.scrollY
+      const delta = currentScrollY - lastPosition
+
+      if (currentScrollY < 50) {
+        setShowNavigation(true)
+      } else if (delta > 2) {
+        if (hideTimeout) clearTimeout(hideTimeout)
+        hideTimeout = setTimeout(() => setShowNavigation(false), 20)
+      } else if (delta < -2) {
+        if (hideTimeout) clearTimeout(hideTimeout)
+        setShowNavigation(true)
+      }
+
+      lastPosition = currentScrollY
+    }
+
+    window.addEventListener("scroll", handleScroll, { passive: true })
+    return () => {
+      window.removeEventListener("scroll", handleScroll)
+      if (hideTimeout) clearTimeout(hideTimeout)
+    }
+  }, [])
+
+  const refreshData = async () => {
+    setIsRefreshing(true)
+    await fetchSystemData()
+    await fetchHealthInfoCount()
+    setComponentKey((prev) => prev + 1)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    setIsRefreshing(false)
+  }
+
+  const statusIcon = useMemo(() => {
+    switch (systemStatus.status) {
+      case "healthy":
+        return <CheckCircle className="h-4 w-4 text-green-500" />
+      case "warning":
+        return <AlertTriangle className="h-4 w-4 text-yellow-500" />
+      case "critical":
+        return <XCircle className="h-4 w-4 text-red-500" />
+    }
+  }, [systemStatus.status])
+
+  const statusColor = useMemo(() => {
+    switch (systemStatus.status) {
+      case "healthy":
+        return "bg-green-500/10 text-green-500 border-green-500/20"
+      case "warning":
+        return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
+      case "critical":
+        return "bg-red-500/10 text-red-500 border-red-500/20"
+    }
+  }, [systemStatus.status])
+
+  const getActiveTabLabel = () => {
+    switch (activeTab) {
+      case "overview":  return t("navigation.overview")
+      case "datastores": return t("pbs.datastores")
+      case "pbs-tasks": return t("pbs.tasksTab")
+      case "apps":      return t("navigation.apps")
+      case "vms":       return t("navigation.virtualMachines")
+      case "storage":   return t("navigation.storage")
+      case "network":   return t("navigation.network")
+      case "hardware":  return t("navigation.hardware")
+      case "backup":    return t("navigation.backup")
+      case "terminal":  return t("navigation.terminal")
+      case "logs":      return t("navigation.systemLogs")
+      case "security":  return t("navigation.security")
+      case "audit":     return t("navigation.audit")
+      case "settings":  return t("navigation.settings")
+      case "about":     return t("navigation.about")
+      case "profile":   return t("navigation.profile")
+      default:          return t("navigation.menu")
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Both describe the PVE Monitor. */}
+      {!isPbs && <OnboardingCarousel />}
+      {!isPbs && <ReleaseNotesModal open={showReleaseNotes} onClose={() => setShowReleaseNotes(false)} />}
+
+      {!isServerConnected && (
+        <div className="bg-red-500/10 border-b border-red-500/20 px-6 py-3">
+          <div className="container mx-auto">
+            <div className="flex items-center space-x-2 text-red-500 mb-2">
+              <XCircle className="h-5 w-5" />
+              <span className="font-medium">{t("status.connectionFailed")}</span>
+            </div>
+            <div className="text-sm text-red-500/80 space-y-1 ml-7">
+              <p>&bull; {t("status.checkService")}</p>
+              <p>&bull; {t("status.serverPort")}</p>
+              <p>
+                &bull; {t("status.tryAccessing")}{" "}
+                <a href={getApiUrl("/api/health")} target="_blank" rel="noopener noreferrer" className="underline">
+                  {getApiUrl("/api/health")}
+                </a>
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <header
+        className="border-b border-border bg-card sticky top-0 z-50 shadow-sm cursor-pointer hover:bg-accent/5 transition-colors"
+        onClick={() => setShowHealthModal(true)}
+      >
+        <div className="container mx-auto px-4 md:px-6 py-4 md:py-4">
+          {/* Logo and Title */}
+          <div className="flex items-start justify-between gap-3">
+            {/* Logo and Title */}
+            <div className="flex items-center space-x-2 md:space-x-3 min-w-0">
+              <div className="w-16 h-16 md:w-10 md:h-10 relative flex items-center justify-center bg-primary/10 flex-shrink-0">
+                <Image
+                  src={updateAvailable ? "/images/proxmenux_update-logo.png" : "/images/proxmenux-logo.png"}
+                  alt="ProxMenux Logo"
+                  width={64}
+                  height={64}
+                  className="object-contain md:w-10 md:h-10"
+                  priority
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement
+                    target.style.display = "none"
+                    const fallback = target.parentElement?.querySelector(".fallback-icon")
+                    if (fallback) {
+                      fallback.classList.remove("hidden")
+                    }
+                  }}
+                />
+                <Server className="h-8 w-8 md:h-6 md:w-6 text-primary absolute fallback-icon hidden" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-lg md:text-xl font-semibold text-foreground truncate">{t("app.title")}</h1>
+                <p className="text-xs md:text-sm text-muted-foreground">{t(isPbs ? "app.descriptionPbs" : "app.description")}</p>
+                <div className="lg:hidden flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                  <Clock className="h-3 w-3" />
+                  <span className="truncate">{t("status.uptime", { uptime: displayUptime })}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop Actions */}
+            <div className="hidden lg:flex items-center space-x-4">
+              <MonitorSwitcher nodeName={displayServerName} />
+
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className={statusColor}>
+                  {statusIcon}
+                  <span className="ml-1">{t(`status.${systemStatus.status}`)}</span>
+                </Badge>
+                {systemStatus.status === "healthy" && infoCount > 0 && (
+                  <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20">
+                    <Info className="h-4 w-4" />
+                    <span className="ml-1">{infoCount} info</span>
+                  </Badge>
+                )}
+              </div>
+
+              <div className="text-sm text-muted-foreground whitespace-nowrap">
+                {t("status.uptime", { uptime: displayUptime })}
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  refreshData()
+                }}
+                disabled={isRefreshing}
+                className="border-border/50 bg-transparent hover:bg-secondary"
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? "animate-spin" : ""}`} />
+                {t("actions.refresh")}
+              </Button>
+
+              <div onClick={(e) => e.stopPropagation()}>
+                <ThemeToggle />
+              </div>
+
+              {/* User account dropdown — Fase 1 (v1.2.2). Self-hides
+                  when auth isn't enabled on this install. */}
+              <div onClick={(e) => e.stopPropagation()}>
+                <AvatarMenu
+                  size="lg"
+                  onOpenProfile={() => setActiveTab("profile")}
+                  onOpenSecurity={() => setActiveTab("security")}
+                />
+              </div>
+            </div>
+
+            {/* Mobile Actions — variant D approved in demo:
+                 • Top-right: Refresh + Theme + Avatar (all with border)
+                 • Bottom row (under Node line): badges left-aligned with
+                   the Node text column, Uptime right-aligned in the same
+                   horizontal line. No extra row for Uptime so the
+                   header doesn't grow vertically. */}
+            <div className="flex lg:hidden items-center gap-1.5 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  refreshData()
+                }}
+                disabled={isRefreshing}
+                className="h-8 w-8 p-0 border-border/50 bg-transparent hover:bg-secondary"
+                aria-label={t("actions.refresh")}
+              >
+                <RefreshCw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
+              </Button>
+
+              <div onClick={(e) => e.stopPropagation()}>
+                <ThemeToggle />
+              </div>
+
+              <div onClick={(e) => e.stopPropagation()}>
+                <AvatarMenu
+                  size="lg"
+                  onOpenProfile={() => setActiveTab("profile")}
+                  onOpenSecurity={() => setActiveTab("security")}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Mobile bottom row — badges (left, aligned with the title
+              column via pl-[3.25rem] = w-16 logo + space-x-2 gap-ish)
+              and Uptime (right). The pl matches the mobile logo width
+              + the parent flex gap so the badges sit visually under
+              "Node: amd", not flush against the screen edge. */}
+          <div className="lg:hidden mt-2 flex items-center justify-between gap-2 pl-[4.5rem]">
+            <div className="flex items-center gap-1.5">
+              <Badge variant="outline" className={`${statusColor} text-xs px-2`}>
+                {statusIcon}
+                <span className="ml-1">{t(`status.${systemStatus.status}`)}</span>
+              </Badge>
+              {systemStatus.status === "healthy" && infoCount > 0 && (
+                <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20 text-xs px-2">
+                  <Info className="h-3 w-3" />
+                  <span className="ml-1">{infoCount}</span>
+                </Badge>
+              )}
+            </div>
+            <MonitorSwitcher nodeName={displayServerName} compact />
+          </div>
+        </div>
+      </header>
+
+      <div
+        className={`sticky z-40 bg-background
+          top-[120px] lg:top-[76px]
+          transition-all duration-700 ease-in-out
+          ${showNavigation ? "translate-y-0 opacity-100" : "-translate-y-[120%] opacity-0 pointer-events-none"}
+        `}
+      >
+        <div className="container mx-auto px-4 lg:px-6 pt-4 lg:pt-6">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-0">
+            {/* Sprint 13D nav redesign — 6 top-level slots in usage order:
+                Overview · VMs & LXCs · Node ⌄ · Backup · Terminal · Admin ⌄
+                Node groups Storage / Network / Hardware (3 sub-items).
+                Admin groups System Logs / Security / Settings / About
+                (will split when RBAC arrives in 1.5.0).
+                Backup is direct now (only Host Backup); becomes a dropdown
+                when VM/LXC centralised backup ships. */}
+            {(() => {
+              const triggerActiveClass =
+                "data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:rounded-md"
+              // Each dropdown lists its children in the order they
+              // render. When one of them is the active tab, the dropdown
+              // trigger swaps its label + icon to that child — same
+              // pattern macOS Settings uses inside a category: the
+              // crumb shows where you are, the chevron tells you the
+              // siblings are one click away.
+              const NODE_ITEMS = [
+                { value: "storage",  label: t("navigation.storage"),  Icon: HardDrive,   default: false },
+                { value: "network",  label: t("navigation.network"),  Icon: NetworkIcon, default: false },
+                { value: "hardware", label: t("navigation.hardware"), Icon: Cpu,         default: false },
+              ]
+              const ADMIN_ITEMS = [
+                { value: "logs",     label: t("navigation.systemLogs"), Icon: ScrollText,  default: false },
+                { value: "security", label: t("navigation.security"),   Icon: ShieldCheck, default: false },
+                { value: "audit",    label: t("navigation.audit"),      Icon: ClipboardCheck, default: false },
+                { value: "settings", label: t("navigation.settings"),   Icon: SettingsIcon, default: false },
+                { value: "about",    label: t("navigation.about"),      Icon: Info,        default: false },
+              ].filter(item => !isPbs || item.value !== "audit")
+              const activeNodeItem  = NODE_ITEMS.find(i => i.value === activeTab)
+              const activeAdminItem = ADMIN_ITEMS.find(i => i.value === activeTab)
+              const isNodeActive    = activeNodeItem !== undefined
+              const isAdminActive   = activeAdminItem !== undefined
+              // The trigger label + icon shown on the bar. When a child
+              // is active we surface IT; otherwise the group default.
+              const NodeTriggerIcon  = activeNodeItem ? activeNodeItem.Icon  : Server
+              const NodeTriggerLabel = activeNodeItem ? activeNodeItem.label : t("navigation.node")
+              const AdminTriggerIcon  = activeAdminItem ? activeAdminItem.Icon  : Settings2
+              const AdminTriggerLabel = activeAdminItem ? activeAdminItem.label : t("navigation.admin")
+              // Dropdown trigger styling: parity with TabsTrigger so the
+              // parent visibly carries the "I'm the selected section"
+              // signal when any of its children is the active tab —
+              // same blue background + white text + rounded as a direct
+              // tab. Without this the user lands on Storage and the
+              // entire top bar looks idle.
+              const dropdownBtnClass = (active: boolean) =>
+                `inline-flex items-center justify-center whitespace-nowrap px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 ${
+                  active
+                    ? "bg-blue-500 text-white rounded-md"
+                    : "text-muted-foreground hover:text-foreground rounded-sm"
+                }`
+
+              // Data-driven TabsList: iterate over the user's saved
+              // top-level order. Each slot is either a direct tab or a
+              // dropdown group (Node/Admin). The internal items of a
+              // dropdown are never reordered by the user — a grouped
+              // slot moves as a unit.
+              const renderDirect = (
+                value: string,
+                Icon: React.ComponentType<{ className?: string }>,
+                label: string,
+              ) => (
+                <TabsTrigger key={value} value={value} className={triggerActiveClass}>
+                  <Icon className="mr-2 h-4 w-4" />
+                  {label}
+                </TabsTrigger>
+              )
+              const renderDropdown = (
+                key: string,
+                items: { value: string; label: string; Icon: React.ComponentType<{ className?: string }> }[],
+                active: boolean,
+                TriggerIcon: React.ComponentType<{ className?: string }>,
+                triggerLabel: string,
+              ) => (
+                <DropdownMenu key={key}>
+                  <DropdownMenuTrigger className={dropdownBtnClass(active)}>
+                    <TriggerIcon className="mr-2 h-4 w-4" />
+                    {triggerLabel}
+                    <ChevronDown className="ml-1.5 h-3 w-3 opacity-70" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="center" className="min-w-[180px]">
+                    {items.map(({ value, label, Icon }) => (
+                      <DropdownMenuItem
+                        key={value}
+                        onClick={() => setActiveTab(value)}
+                        className={activeTab === value ? "bg-blue-500/10 text-blue-500" : ""}
+                      >
+                        <Icon className="mr-2 h-4 w-4" />
+                        {label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )
+              const renderTop = (id: TopTab) => {
+                switch (id) {
+                  case "overview": return renderDirect("overview", LayoutDashboard, t("navigation.overview"))
+                  case "datastores": return renderDirect("datastores", Database, t("pbs.datastores"))
+                  case "pbs-tasks": return renderDirect("pbs-tasks", ListChecks, t("pbs.tasksTab"))
+                  case "apps":     return renderDirect("apps",     Grid3x3,         t("navigation.apps"))
+                  case "vms":      return renderDirect("vms",      Boxes,           t("navigation.virtualMachines"))
+                  case "backup":   return renderDirect("backup",   DatabaseBackup,  t("navigation.backup"))
+                  case "terminal": return renderDirect("terminal", Terminal,        t("navigation.terminal"))
+                  case "node":     return renderDropdown("node",  NODE_ITEMS,  isNodeActive,  NodeTriggerIcon,  NodeTriggerLabel)
+                  case "admin":    return renderDropdown("admin", ADMIN_ITEMS, isAdminActive, AdminTriggerIcon, AdminTriggerLabel)
+                }
+              }
+              return (
+                <TabsList className={`hidden lg:grid w-full ${isPbs ? "grid-cols-5" : "grid-cols-7"} bg-card border border-border`}>
+                  {tabOrder.map(renderTop)}
+                </TabsList>
+              )
+            })()}
+
+            <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
+              <div className="lg:hidden">
+                <SheetTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={`w-full justify-between border-border ${
+                      activeTab ? "bg-blue-500/10 text-blue-500" : "bg-card"
+                    }`}
+                  >
+                    <span>{getActiveTabLabel()}</span>
+                    <Menu className="h-4 w-4" />
+                  </Button>
+                </SheetTrigger>
+              </div>
+              <SheetContent side="top" className="bg-card border-border">
+                {(() => {
+                  // Sheet items mirror the desktop layout: 6 sections,
+                  // with two of them (Node, Admin) collapsing into a
+                  // header + nested items. Direct tabs (Overview, VMs,
+                  // Backup, Terminal) sit at the top level.
+                  const select = (v: string) => {
+                    setActiveTab(v)
+                    setMobileMenuOpen(false)
+                  }
+                  const itemClass = (active: boolean) =>
+                    `w-full justify-start gap-3 ${
+                      active
+                        ? "bg-blue-500/10 text-blue-500 border-l-4 border-blue-500 rounded-l-none"
+                        : ""
+                    }`
+                  // Mobile sheet honours the same user-defined
+                  // top-level order as the desktop TabsList. Grouped
+                  // slots (Node/Admin) expand their child items
+                  // inline right after their position — the group
+                  // still moves as a unit, but children stay grouped.
+                  const btn = (
+                    value: string,
+                    Icon: React.ComponentType<{ className?: string }>,
+                    label: string,
+                  ) => (
+                    <Button
+                      key={value}
+                      variant="ghost"
+                      onClick={() => select(value)}
+                      className={itemClass(activeTab === value)}
+                    >
+                      <Icon className="h-5 w-5" />
+                      <span>{label}</span>
+                    </Button>
+                  )
+                  return (
+                    <div className="flex flex-col gap-1 mt-4">
+                      {tabOrder.map((id): React.ReactNode => {
+                        switch (id) {
+                          case "overview": return btn("overview", LayoutDashboard, t("navigation.overview"))
+                          case "datastores": return btn("datastores", Database, t("pbs.datastores"))
+                          case "pbs-tasks": return btn("pbs-tasks", ListChecks, t("pbs.tasksTab"))
+                          case "apps":     return btn("apps",     Grid3x3,         t("navigation.apps"))
+                          case "vms":      return btn("vms",      Boxes,           t("navigation.virtualMachines"))
+                          case "backup":   return btn("backup",   DatabaseBackup,  t("navigation.backup"))
+                          case "terminal": return btn("terminal", Terminal,        t("navigation.terminal"))
+                          case "node": return (
+                            <React.Fragment key="node">
+                              {btn("storage",  HardDrive,   t("navigation.storage"))}
+                              {btn("network",  NetworkIcon, t("navigation.network"))}
+                              {btn("hardware", Cpu,         t("navigation.hardware"))}
+                            </React.Fragment>
+                          )
+                          case "admin": return (
+                            <React.Fragment key="admin">
+                              {btn("logs",     ScrollText,  t("navigation.systemLogs"))}
+                              {btn("security", ShieldCheck, t("navigation.security"))}
+                              {!isPbs && btn("audit",    ClipboardCheck, t("navigation.audit"))}
+                              {btn("settings", SettingsIcon, t("navigation.settings"))}
+                              {btn("about",    Info,         t("navigation.about"))}
+                            </React.Fragment>
+                          )
+                        }
+                      })}
+                    </div>
+                  )
+                })()}
+              </SheetContent>
+            </Sheet>
+          </Tabs>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-4 md:px-6 py-4 md:py-6">
+        {/* No `space-y-*` here: only one TabsContent is visible at a
+            time, but Overview stays force-mounted (hidden) as the
+            first child, so every OTHER active tab used to inherit an
+            extra top margin from the space-y utility — pushing the
+            page content further from the nav than on Overview.
+            Vertical spacing INSIDE each tab lives on its own
+            TabsContent's `space-y-*`. */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-0">
+          {/* forceMount so SystemOverview mounts at dashboard load and
+              never gets torn down when the user visits another tab.
+              Without this, every return to Overview re-fires ~7 fetches
+              (system, vms, storage, proxmox-storage, network, node
+              metrics, network chart) and the user waited for the
+              cascade to complete each time. With forceMount, the
+              5 s / 59 s refresh intervals keep the data fresh in the
+              background — reopening the tab is instant. */}
+          <TabsContent value="overview" forceMount className="space-y-4 md:space-y-6 mt-0 data-[state=inactive]:hidden">
+            <SystemOverview key={`overview-${componentKey}`} product={product} />
+          </TabsContent>
+
+          {isPbs && (
+            <TabsContent value="datastores" className="space-y-4 md:space-y-6 mt-0">
+              <PBSPanel key={`datastores-${componentKey}`} localOnly view="datastores" />
+              <StorageOverview key={`datastore-disks-${componentKey}`} disksOnly />
+            </TabsContent>
+          )}
+          {isPbs && (
+            <TabsContent value="pbs-tasks" className="space-y-4 md:space-y-6 mt-0">
+              <PBSPanel key={`pbs-tasks-${componentKey}`} localOnly view="tasks" />
+            </TabsContent>
+          )}
+
+          {!isPbs && <>
+          <TabsContent value="apps" className="space-y-4 md:space-y-6 mt-0">
+            <AppsDashboard key={`apps-${componentKey}`} />
+          </TabsContent>
+
+          <TabsContent value="storage" className="space-y-4 md:space-y-6 mt-0">
+            <StorageOverview key={`storage-${componentKey}`} />
+          </TabsContent>
+
+          <TabsContent value="network" className="space-y-4 md:space-y-6 mt-0">
+            <NetworkMetrics key={`network-${componentKey}`} />
+          </TabsContent>
+
+          {/* forceMount so the modal-data prefetcher (inside VirtualMachines)
+              starts warming caches from the moment the dashboard loads,
+              not the first time the user clicks the VMs tab. Kept
+              visually hidden with data-attribute selector when the tab
+              is inactive — mount cost is ~zero (no polling loop that
+              other components run). */}
+          <TabsContent value="vms" forceMount className="space-y-4 md:space-y-6 mt-0 data-[state=inactive]:hidden">
+            <VirtualMachines key={`vms-${componentKey}`} />
+          </TabsContent>
+
+          <TabsContent value="hardware" className="space-y-4 md:space-y-6 mt-0">
+            <Hardware key={`hardware-${componentKey}`} />
+          </TabsContent>
+          </>}
+
+          <TabsContent value="logs" className="space-y-4 md:space-y-6 mt-0">
+            <SystemLogs key={`logs-${componentKey}`} />
+          </TabsContent>
+
+          {!isPbs && <>
+          <TabsContent value="audit" className="space-y-4 md:space-y-6 mt-0">
+            <AuditReport key={`audit-${componentKey}`} />
+          </TabsContent>
+
+          <TabsContent value="backup" className="space-y-4 md:space-y-6 mt-0">
+            <BackupTab key={`backup-${componentKey}`} />
+          </TabsContent>
+          </>}
+
+          <TabsContent value="terminal" className="mt-0">
+            <TerminalPanel key={`terminal-${componentKey}`} />
+          </TabsContent>
+
+          <TabsContent value="security" className="space-y-4 md:space-y-6 mt-0">
+            <Security key={`security-${componentKey}`} hostType={product} />
+          </TabsContent>
+
+          {/* Profile tab — not surfaced in the top tabs nav. The only
+              entry point is the avatar dropdown in the header (View
+              profile). v1.2.2 Fase 2. */}
+          <TabsContent value="profile" className="space-y-4 md:space-y-6 mt-0">
+            <Profile
+              key={`profile-${componentKey}`}
+              onOpenSecurity={() => setActiveTab("security")}
+            />
+          </TabsContent>
+
+          <TabsContent value="settings" className="space-y-4 md:space-y-6 mt-0">
+            <Settings />
+          </TabsContent>
+
+          <TabsContent value="about" className="space-y-4 md:space-y-6 mt-0">
+            <About />
+          </TabsContent>
+        </Tabs>
+
+        <footer className="mt-8 md:mt-12 pt-4 md:pt-6 border-t border-border text-center text-xs md:text-sm text-muted-foreground">
+          <p className="font-medium mb-2">ProxMenux Monitor v{APP_VERSION}</p>
+          <p>
+            <a
+              href="https://ko-fi.com/macrimi"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-500 hover:text-blue-600 hover:underline transition-colors"
+            >
+              {t("app.supportProject")}
+            </a>
+          </p>
+        </footer>
+      </div>
+
+      <HealthStatusModal open={showHealthModal} onOpenChange={setShowHealthModal} getApiUrl={getApiUrl} />
+    </div>
+  )
+}

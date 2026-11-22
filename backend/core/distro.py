@@ -1,5 +1,5 @@
 """
-LinuxMenux Distro Detection Engine
+Linux Menux Distro Detection Engine
 Identifies Linux distribution family, package manager, and system capabilities.
 """
 

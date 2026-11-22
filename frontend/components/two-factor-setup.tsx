@@ -1,0 +1,324 @@
+"use client"
+
+import { useState } from "react"
+import { Button } from "./ui/button"
+import { Input } from "./ui/input"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog"
+import { AlertCircle, CheckCircle, Copy, Shield, Check } from "lucide-react"
+import { getApiUrl } from "../lib/api-config"
+import { useT } from "../lib/i18n/provider"
+
+interface TwoFactorSetupProps {
+  open: boolean
+  onClose: () => void
+  onSuccess: () => void
+}
+
+export function TwoFactorSetup({ open, onClose, onSuccess }: TwoFactorSetupProps) {
+  const t = useT()
+  const tf = (key: string) => t(`securityPage.twoFactorSetup.${key}`)
+  const [step, setStep] = useState(1)
+  const [qrCode, setQrCode] = useState("")
+  const [secret, setSecret] = useState("")
+  const [backupCodes, setBackupCodes] = useState<string[]>([])
+  const [verificationCode, setVerificationCode] = useState("")
+  const [error, setError] = useState("")
+  const [loading, setLoading] = useState(false)
+  const [copiedSecret, setCopiedSecret] = useState(false)
+  const [copiedCodes, setCopiedCodes] = useState(false)
+
+  const handleSetupStart = async () => {
+    setError("")
+    setLoading(true)
+
+    try {
+      const token = localStorage.getItem("proxmenux-auth-token")
+      const response = await fetch(getApiUrl("/api/auth/totp/setup"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || tf("setupFailed"))
+      }
+
+      setQrCode(data.qr_code)
+      setSecret(data.secret)
+      setBackupCodes(data.backup_codes)
+      setStep(2)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tf("setupFailed"))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerify = async () => {
+    if (!verificationCode || verificationCode.length !== 6) {
+      setError(tf("enterSixDigitCode"))
+      return
+    }
+
+    setError("")
+    setLoading(true)
+
+    try {
+      const token = localStorage.getItem("proxmenux-auth-token")
+      const response = await fetch(getApiUrl("/api/auth/totp/enable"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ token: verificationCode }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || tf("invalidCode"))
+      }
+
+      setStep(3)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : tf("verificationFailed"))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const copyToClipboard = async (text: string, type: "secret" | "codes") => {
+    let ok = false
+
+    // Path 1: modern Clipboard API. Only works on HTTPS / localhost.
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text)
+        ok = true
+      }
+    } catch {
+      // fall through
+    }
+
+    // Path 2: legacy execCommand. Picky — some browsers (iOS Safari
+    // especially) refuse to copy from an element placed off-screen
+    // (`left: -9999px`), which is the previous version's mistake.
+    // Keep the textarea inside the viewport but visually invisible.
+    if (!ok) {
+      const textarea = document.createElement("textarea")
+      textarea.value = text
+      textarea.style.position = "fixed"
+      textarea.style.top = "0"
+      textarea.style.left = "0"
+      textarea.style.width = "2em"
+      textarea.style.height = "2em"
+      textarea.style.padding = "0"
+      textarea.style.border = "none"
+      textarea.style.outline = "none"
+      textarea.style.boxShadow = "none"
+      textarea.style.background = "transparent"
+      textarea.style.opacity = "0"
+      textarea.setAttribute("readonly", "")
+      textarea.setAttribute("aria-hidden", "true")
+      document.body.appendChild(textarea)
+      try {
+        textarea.focus()
+        textarea.select()
+        textarea.setSelectionRange(0, text.length)
+        ok = document.execCommand("copy")
+      } catch {
+        ok = false
+      } finally {
+        document.body.removeChild(textarea)
+      }
+    }
+
+    // Path 3: last-resort window.prompt — ugly but unblockable. The
+    // user can select+copy from the prompt manually. This guarantees
+    // they can finish the 2FA setup even on plain-HTTP Monitor where
+    // both the Clipboard API and execCommand may be locked down.
+    if (!ok) {
+      try {
+        window.prompt(tf("copyPrompt"), text)
+        ok = true
+      } catch {
+        // ignore
+      }
+    }
+
+    if (!ok) {
+      console.error("Failed to copy to clipboard")
+      return
+    }
+
+    if (type === "secret") {
+      setCopiedSecret(true)
+      setTimeout(() => setCopiedSecret(false), 2000)
+    } else {
+      setCopiedCodes(true)
+      setTimeout(() => setCopiedCodes(false), 2000)
+    }
+  }
+
+  const handleClose = () => {
+    setStep(1)
+    setQrCode("")
+    setSecret("")
+    setBackupCodes([])
+    setVerificationCode("")
+    setError("")
+    onClose()
+  }
+
+  const handleFinish = () => {
+    handleClose()
+    onSuccess()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Shield className="h-5 w-5 text-blue-500" />
+            {tf("title")}
+          </DialogTitle>
+          <DialogDescription>{tf("description")}</DialogDescription>
+        </DialogHeader>
+
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3 flex items-start gap-2">
+            <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-red-500">{error}</p>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="space-y-4">
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+              <p className="text-sm text-blue-500">
+                {tf("intro")}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-medium">{tf("youWillNeed")}</h4>
+              <ul className="text-sm text-muted-foreground space-y-1 list-disc list-inside">
+                <li>{tf("needApp")}</li>
+                <li>{tf("needQrOrKey")}</li>
+                <li>{tf("needBackupCodes")}</li>
+              </ul>
+            </div>
+
+            <Button onClick={handleSetupStart} className="w-full bg-blue-500 hover:bg-blue-600" disabled={loading}>
+              {loading ? tf("starting") : tf("startSetup")}
+            </Button>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <h4 className="font-medium">{tf("scanTitle")}</h4>
+              <p className="text-sm text-muted-foreground">{tf("scanDescription")}</p>
+              {qrCode && (
+                <div className="flex justify-center p-4 bg-white rounded-lg">
+                  <img src={qrCode || "/placeholder.svg"} alt={tf("qrCodeAlt")} width={200} height={200} className="rounded" />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-medium">{tf("manualKey")}</h4>
+              <div className="flex gap-2">
+                <Input value={secret} readOnly className="font-mono text-sm" />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => copyToClipboard(secret, "secret")}
+                  title={tf("copyKey")}
+                >
+                  {copiedSecret ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-medium">{tf("verifyTitle")}</h4>
+              <p className="text-sm text-muted-foreground">{tf("verifyDescription")}</p>
+              <Input
+                type="text"
+                placeholder="000000"
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="text-center text-lg tracking-widest font-mono text-base"
+                maxLength={6}
+                disabled={loading}
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <Button onClick={handleVerify} className="flex-1 bg-blue-500 hover:bg-blue-600" disabled={loading}>
+                {loading ? tf("verifying") : tf("verifyAndEnable")}
+              </Button>
+              <Button onClick={handleClose} variant="outline" className="flex-1 bg-transparent" disabled={loading}>
+                {t("actions.cancel")}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-4">
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-start gap-2">
+              <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-medium text-green-500">{tf("enabledTitle")}</p>
+                <p className="text-sm text-green-500 mt-1">
+                  {tf("enabledDescription")}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <h4 className="font-medium text-orange-500">{tf("saveCodesTitle")}</h4>
+              <p className="text-sm text-muted-foreground">
+                {tf("saveCodesDescription")}
+              </p>
+
+              <div className="bg-muted/50 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-sm font-medium">{tf("backupCodes")}</span>
+                  <Button variant="outline" size="sm" onClick={() => copyToClipboard(backupCodes.join("\n"), "codes")}>
+                    {copiedCodes ? (
+                      <Check className="h-4 w-4 text-green-500 mr-2" />
+                    ) : (
+                      <Copy className="h-4 w-4 mr-2" />
+                    )}
+                    {tf("copyAll")}
+                  </Button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {backupCodes.map((code, index) => (
+                    <div key={index} className="bg-background rounded px-3 py-2 font-mono text-sm text-center">
+                      {code}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <Button onClick={handleFinish} className="w-full bg-blue-500 hover:bg-blue-600">
+              {tf("finish")}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}

@@ -1,11 +1,12 @@
 """
-LinuxMenux Docker Engine & Swarm Monitor
-Communicates natively with /var/run/docker.sock to inspect Docker Swarm clusters,
-Dokploy Stacks, Services, and Containers.
+Linux Menux Docker Engine, Compose & Swarm Monitor
+Natively communicates with /var/run/docker.sock to inspect Docker Swarm clusters,
+Dokploy Stacks, Compose Projects, and Containers.
 """
 
 import http.client
 import json
+import re
 import socket
 from typing import Dict, Any, List, Optional
 
@@ -23,7 +24,7 @@ class UnixSocketHTTPConnection(http.client.HTTPConnection):
 
 
 class DockerClient:
-    """Lightweight Docker Engine & Swarm API client using the local Unix domain socket."""
+    """Lightweight Docker Engine, Compose & Swarm API client using the local Unix domain socket."""
     def __init__(self, socket_path: str = "/var/run/docker.sock"):
         self.socket_path = socket_path
 
@@ -50,8 +51,20 @@ class DockerClient:
 docker_cli = DockerClient()
 
 
+def _extract_traefik_domains(labels: Dict[str, str]) -> List[str]:
+    """Extract public domains configured via Traefik in Dokploy."""
+    domains = []
+    for k, v in labels.items():
+        if "traefik.http.routers." in k and ".rule" in k:
+            # Matches Host(`example.com`) or Host("example.com")
+            matches = re.findall(r"Host\([`'\"]([^`'\"]+)[`'\"]\)", v)
+            for m in matches:
+                domains.extend([d.strip() for d in m.split(",") if d.strip()])
+    return list(set(domains))
+
+
 def get_docker_overview() -> Dict[str, Any]:
-    """Returns general Docker Engine and Swarm state."""
+    """Returns general Docker Engine, Compose, and Swarm state."""
     info = docker_cli.request("/info")
     if isinstance(info, dict) and "error" in info:
         return {
@@ -96,13 +109,18 @@ def list_swarm_services() -> List[Dict[str, Any]]:
         replicas = mode.get("Replicated", {}).get("Replicas", 1)
         labels = spec.get("Labels", {})
         stack = labels.get("com.docker.stack.namespace", labels.get("dokploy.appName", "default"))
+        traefik_domains = _extract_traefik_domains(labels)
 
         services.append({
             "id": svc.get("ID"),
             "name": spec.get("Name"),
             "stack": stack,
+            "type": "swarm",
+            "is_dokploy": bool(labels.get("dokploy.appName") or labels.get("dokploy.projectName")),
+            "dokploy_app": labels.get("dokploy.appName", ""),
             "image": spec.get("TaskTemplate", {}).get("ContainerSpec", {}).get("Image", "").split("@")[0],
             "replicas_target": replicas,
+            "traefik_domains": traefik_domains,
             "created_at": svc.get("CreatedAt"),
             "updated_at": svc.get("UpdatedAt"),
             "labels": labels,
@@ -111,7 +129,7 @@ def list_swarm_services() -> List[Dict[str, Any]]:
 
 
 def list_containers(all_containers: bool = True) -> List[Dict[str, Any]]:
-    """List all containers on the host with status, image, and ports."""
+    """List all containers on the host with status, Dokploy metadata, and Traefik domains."""
     path = f"/containers/json?all={'true' if all_containers else 'false'}"
     raw = docker_cli.request(path)
     if not isinstance(raw, list):
@@ -122,20 +140,91 @@ def list_containers(all_containers: bool = True) -> List[Dict[str, Any]]:
         names = [n.lstrip("/") for n in c.get("Names", [])]
         name = names[0] if names else c.get("Id", "")[:12]
         labels = c.get("Labels", {})
-        stack = labels.get("com.docker.stack.namespace", labels.get("com.docker.compose.project", "standalone"))
+
+        # Dokploy Compose vs Dokploy Swarm vs Standalone
+        compose_project = labels.get("com.docker.compose.project")
+        compose_service = labels.get("com.docker.compose.service")
+        swarm_stack = labels.get("com.docker.stack.namespace")
+        dokploy_app = labels.get("dokploy.appName") or labels.get("dokploy.projectName")
+
+        stack_name = swarm_stack or compose_project or dokploy_app or "standalone"
+        orchestrator = "swarm" if swarm_stack else ("compose" if compose_project else "docker")
+        is_dokploy = bool(dokploy_app or "dokploy" in stack_name.lower())
+        traefik_domains = _extract_traefik_domains(labels)
 
         result.append({
             "id": c.get("Id", "")[:12],
             "full_id": c.get("Id", ""),
             "name": name,
-            "stack": stack,
+            "stack": stack_name,
+            "orchestrator": orchestrator,
+            "is_dokploy": is_dokploy,
+            "dokploy_app": dokploy_app or "",
+            "compose_service": compose_service or "",
             "image": c.get("Image", ""),
             "state": c.get("State", ""),
             "status": c.get("Status", ""),
+            "traefik_domains": traefik_domains,
             "created": c.get("Created", 0),
             "ports": c.get("Ports", []),
+            "labels": labels,
         })
     return result
+
+
+def get_dokploy_and_compose_stacks() -> Dict[str, Any]:
+    """
+    Groups containers and services by Dokploy Application, Compose Project, or Swarm Stack.
+    Supports both Docker Compose and Docker Swarm seamlessly.
+    """
+    containers = list_containers(all_containers=True)
+    services = list_swarm_services()
+
+    stacks: Dict[str, Dict[str, Any]] = {}
+
+    # 1. Group Compose / Standalone containers
+    for c in containers:
+        st_name = c["stack"]
+        if st_name not in stacks:
+            stacks[st_name] = {
+                "name": st_name,
+                "orchestrator": c["orchestrator"],
+                "is_dokploy": c["is_dokploy"],
+                "containers_count": 0,
+                "running_count": 0,
+                "traefik_domains": [],
+                "items": [],
+            }
+        stacks[st_name]["containers_count"] += 1
+        if c["state"] == "running":
+            stacks[st_name]["running_count"] += 1
+        if c["traefik_domains"]:
+            stacks[st_name]["traefik_domains"].extend(c["traefik_domains"])
+            stacks[st_name]["traefik_domains"] = list(set(stacks[st_name]["traefik_domains"]))
+        stacks[st_name]["items"].append(c)
+
+    # 2. Add Swarm Services if available
+    for s in services:
+        st_name = s["stack"]
+        if st_name not in stacks:
+            stacks[st_name] = {
+                "name": st_name,
+                "orchestrator": "swarm",
+                "is_dokploy": s["is_dokploy"],
+                "containers_count": 0,
+                "running_count": 0,
+                "traefik_domains": [],
+                "items": [],
+            }
+        if s["traefik_domains"]:
+            stacks[st_name]["traefik_domains"].extend(s["traefik_domains"])
+            stacks[st_name]["traefik_domains"] = list(set(stacks[st_name]["traefik_domains"]))
+        stacks[st_name]["items"].append(s)
+
+    return {
+        "stacks_count": len(stacks),
+        "stacks": list(stacks.values()),
+    }
 
 
 def container_action(container_id: str, action: str) -> Dict[str, Any]:

@@ -1,0 +1,1309 @@
+"use client"
+
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card"
+import { Badge } from "./ui/badge"
+import { Button } from "./ui/button"
+import { Input } from "./ui/input"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select"
+import { ScrollArea } from "./ui/scroll-area"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog"
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "./ui/sheet"
+import {
+  FileText,
+  Search,
+  Download,
+  AlertTriangle,
+  Info,
+  CheckCircle,
+  XCircle,
+  Database,
+  Activity,
+  HardDrive,
+  Calendar,
+  RefreshCw,
+  Bell,
+  Mail,
+  Menu,
+  Terminal,
+} from "lucide-react"
+import { useState, useEffect, useMemo } from "react"
+import { API_PORT, fetchApi, getApiUrl, getAuthToken } from "@/lib/api-config"
+import { useI18n } from "@/lib/i18n/provider"
+
+interface Backup {
+  volid: string
+  storage: string
+  vmid: string | null
+  type: string | null
+  size: number
+  size_human: string
+  created: string
+  timestamp: number
+}
+
+interface Event {
+  upid: string
+  type: string
+  status: string
+  level: string
+  node: string
+  user: string
+  vmid: string
+  starttime: string
+  endtime: string
+  duration: string
+}
+
+interface Notification {
+  timestamp: string
+  type: string
+  service: string
+  message: string
+  source: string
+}
+
+interface SystemLog {
+  timestamp: string
+  level: string
+  service: string
+  unit?: string
+  message: string
+  source: string
+  pid?: string
+  hostname?: string
+}
+
+interface CombinedLogEntry {
+  timestamp: string
+  level: string
+  service: string
+  unit?: string
+  message: string
+  source: string
+  pid?: string
+  hostname?: string
+  isEvent: boolean
+  eventData?: Event
+  sortTimestamp: number
+}
+
+export function SystemLogs() {
+  const { language, t } = useI18n()
+  const [logs, setLogs] = useState<SystemLog[]>([])
+  const [backups, setBackups] = useState<Backup[]>([])
+  const [events, setEvents] = useState<Event[]>([])
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const [searchTerm, setSearchTerm] = useState("")
+  const [levelFilter, setLevelFilter] = useState("all")
+  const [serviceFilter, setServiceFilter] = useState("all")
+  const [activeTab, setActiveTab] = useState("logs")
+
+  const [displayedLogsCount, setDisplayedLogsCount] = useState(100)
+
+  const [selectedLog, setSelectedLog] = useState<SystemLog | null>(null)
+  const [selectedEvent, setSelectedEvent] = useState<Event | null>(null)
+  const [selectedBackup, setSelectedBackup] = useState<Backup | null>(null)
+  const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null)
+  const [isLogModalOpen, setIsLogModalOpen] = useState(false)
+  const [isEventModalOpen, setIsEventModalOpen] = useState(false)
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false)
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false)
+
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+
+  const [dateFilter, setDateFilter] = useState("1")
+  const [customDays, setCustomDays] = useState("1")
+  const [refreshCounter, setRefreshCounter] = useState(0)
+
+  // Real on-host counts for the selected date range. /api/logs caps
+  // the entries it returns at 10 000 for performance, but the Total
+  // / Errors / Warnings cards must show the actual counts in the
+  // selected window — otherwise on a busy host the user sees "10 000"
+  // when the host really has 438 000 entries. Fetched separately from
+  // /api/logs/counts which runs three lightweight `wc -l` queries.
+  const [logsCounts, setLogsCounts] = useState<{ total: number; errors: number; warnings: number; info: number } | null>(null)
+
+  // Single unified useEffect for all data loading
+  // Fires on mount, when filters change, or when refresh is triggered
+  useEffect(() => {
+    let cancelled = false
+    const loadData = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        const daysAgo = dateFilter === "custom" ? Number.parseInt(customDays) : Number.parseInt(dateFilter)
+        const clampedDays = Math.max(1, Math.min(daysAgo || 1, 90))
+        const [logsRes, backupsRes, eventsRes, notificationsRes, countsRes] = await Promise.all([
+          fetchSystemLogs(dateFilter, customDays),
+          fetchApi<{ backups?: Backup[] }>("/api/backups"),
+          fetchApi<{ events?: Event[] }>("/api/events?limit=50"),
+          fetchApi<{ notifications?: Notification[] }>("/api/notifications"),
+          fetchApi<{ total: number; errors: number; warnings: number; info: number }>(`/api/logs/counts?since_days=${clampedDays}`),
+        ])
+        if (cancelled) return
+        setLogs(logsRes)
+        setBackups(backupsRes.backups || [])
+        setEvents(eventsRes.events || [])
+        setNotifications(notificationsRes.notifications || [])
+        setLogsCounts(countsRes)
+      } catch (err) {
+        if (cancelled) return
+        setError(t("systemLogs.errors.connectFailed"))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    loadData()
+    return () => { cancelled = true }
+  }, [dateFilter, customDays, refreshCounter])
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setDisplayedLogsCount(100)
+  }, [searchTerm, levelFilter, serviceFilter, dateFilter, customDays])
+
+  const refreshData = () => {
+    setRefreshCounter((prev) => prev + 1)
+  }
+
+  const fetchSystemLogs = async (filterDays: string, filterCustom: string): Promise<SystemLog[]> => {
+    try {
+      const daysAgo = filterDays === "custom" ? Number.parseInt(filterCustom) : Number.parseInt(filterDays)
+      const clampedDays = Math.max(1, Math.min(daysAgo || 1, 90))
+      const apiUrl = `/api/logs?since_days=${clampedDays}`
+
+      const data = await fetchApi<{ logs?: SystemLog[] } | SystemLog[]>(apiUrl)
+      return Array.isArray(data) ? data : data.logs || []
+    } catch {
+      setError(t("systemLogs.errors.loadFailed"))
+      return []
+    }
+  }
+
+  const handleDownloadLogs = async () => {
+    try {
+      // Generate filename based on active filters
+      const filters = []
+      const days = dateFilter === "custom" ? customDays : dateFilter
+      filters.push(`${days}days`)
+
+      if (levelFilter !== "all") {
+        filters.push(levelFilter)
+      }
+      if (serviceFilter !== "all") {
+        filters.push(serviceFilter)
+      }
+      if (searchTerm) {
+        filters.push("searched")
+      }
+
+      const filename = `proxmox_logs_${filters.length > 0 ? filters.join("_") + "_" : ""}${new Date().toISOString().split("T")[0]}.txt`
+
+      // Generate log content
+      const logContent = [
+        t("systemLogs.export.title"),
+        `${t("systemLogs.fields.generated")}: ${new Date().toISOString()}`,
+        `${t("systemLogs.cards.totalEntries")}: ${filteredCombinedLogs.length.toLocaleString()}`,
+        ``,
+        `${t("systemLogs.export.filtersApplied")}:`,
+        `- ${t("systemLogs.filters.dateRange")}: ${t("systemLogs.filters.daysAgo", { count: dateFilter === "custom" ? customDays : dateFilter })}`,
+        `- ${t("systemLogs.fields.level")}: ${levelFilter === "all" ? t("systemLogs.filters.allLevels") : levelLabel(levelFilter)}`,
+        `- ${t("systemLogs.fields.service")}: ${serviceFilter === "all" ? t("systemLogs.filters.allServices") : serviceFilter}`,
+        `- ${t("systemLogs.fields.search")}: ${searchTerm || t("systemLogs.fields.none")}`,
+        ``,
+        `${"=".repeat(80)}`,
+        ``,
+        ...filteredCombinedLogs.map((log) => {
+          const lines = [
+            `[${log.timestamp}] ${levelLabel(log.level)} - ${log.service}${log.isEvent ? ` [${t("systemLogs.badges.event")}]` : ""}`,
+            `${t("systemLogs.fields.message")}: ${log.message}`,
+            `${t("systemLogs.fields.source")}: ${log.source}`,
+          ]
+          if (log.pid) lines.push(`PID: ${log.pid}`)
+          if (log.hostname) lines.push(`${t("systemLogs.fields.hostname")}: ${log.hostname}`)
+          lines.push(`${"-".repeat(80)}`)
+          return lines.join("\n")
+        }),
+      ].join("\n")
+
+      // Create and download blob
+      const blob = new Blob([logContent], { type: "text/plain" })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch (err) {
+      console.error("Error exporting logs:", err)
+    }
+  }
+
+  const extractUPID = (message: string): string | null => {
+    const upidMatch = message.match(/UPID:[^\s:]+:[^\s:]+:[^\s:]+:[^\s:]+:[^\s:]+:[^\s:]*:[^\s:]*:?[^\s]*/)
+    return upidMatch ? upidMatch[0] : null
+  }
+
+  const handleDownloadNotificationLog = async (notification: Notification) => {
+    try {
+      const upid = extractUPID(notification.message)
+
+      if (upid) {
+        // Try to fetch the complete task log from Proxmox.
+        // We use a direct fetch (not fetchApi) because the response is
+        // text/plain — fetchApi assumes JSON and would throw on parse,
+        // landing in the silent catch below. Audit residual #fetchApi-text-arg.
+        try {
+          const token = getAuthToken()
+          const headers: Record<string, string> = {}
+          if (token) headers["Authorization"] = `Bearer ${token}`
+          const resp = await fetch(getApiUrl(`/api/task-log/${encodeURIComponent(upid)}`), {
+            headers,
+            cache: "no-store",
+          })
+          if (!resp.ok) {
+            throw new Error(`task-log fetch failed: ${resp.status}`)
+          }
+          const taskLog = await resp.text()
+
+          // Download the complete task log
+          const blob = new Blob(
+            [
+              `${t("systemLogs.download.taskLog")}\n`,
+              `================\n\n`,
+              `UPID: ${upid}\n`,
+              `${t("systemLogs.fields.timestamp")}: ${notification.timestamp}\n`,
+              `${t("systemLogs.fields.service")}: ${notification.service}\n`,
+              `${t("systemLogs.fields.source")}: ${notification.source}\n\n`,
+              `${t("systemLogs.download.completeTaskLog")}:\n`,
+              `${"-".repeat(80)}\n`,
+              `${taskLog}\n`,
+            ],
+            { type: "text/plain" },
+          )
+
+          const url = window.URL.createObjectURL(blob)
+          const a = document.createElement("a")
+          a.href = url
+          a.download = `task_log_${upid.replace(/:/g, "_")}_${notification.timestamp.replace(/[:\s]/g, "_")}.txt`
+          document.body.appendChild(a)
+          a.click()
+          window.URL.revokeObjectURL(url)
+          document.body.removeChild(a)
+          return
+        } catch {
+          // Fall through to download notification message
+        }
+      }
+
+      // If no UPID or failed to fetch task log, download the notification message
+      const blob = new Blob(
+        [
+          `${t("systemLogs.modals.notificationTitle")}\n`,
+          `==================\n\n`,
+          `${t("systemLogs.fields.timestamp")}: ${notification.timestamp}\n`,
+          `${t("systemLogs.fields.type")}: ${notification.type}\n`,
+          `${t("systemLogs.fields.service")}: ${notification.service}\n`,
+          `${t("systemLogs.fields.source")}: ${notification.source}\n\n`,
+          `${t("systemLogs.download.completeMessage")}:\n`,
+          `${notification.message}\n`,
+        ],
+        { type: "text/plain" },
+      )
+
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `notification_${notification.timestamp.replace(/[:\s]/g, "_")}.txt`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+    } catch {
+      // Download failed silently
+    }
+  }
+
+  const safeToLowerCase = (value: any): string => {
+    if (value === null || value === undefined) return ""
+    return String(value).toLowerCase()
+  }
+
+  const combinedLogs: CombinedLogEntry[] = useMemo(
+    () =>
+      [
+        ...logs.map((log) => ({ ...log, isEvent: false, sortTimestamp: new Date(log.timestamp).getTime() })),
+        ...events.map((event) => ({
+          timestamp: event.starttime,
+          level: event.level,
+          service: event.type,
+          message: `${event.type}${event.vmid ? ` (VM/CT ${event.vmid})` : ""} - ${event.status}`,
+          source: `${t("systemLogs.fields.node")}: ${event.node} • ${t("systemLogs.fields.user")}: ${event.user}`,
+          isEvent: true,
+          eventData: event,
+          sortTimestamp: new Date(event.starttime).getTime(),
+        })),
+      ].sort((a, b) => b.sortTimestamp - a.sortTimestamp),
+    [logs, events],
+  )
+
+  const filteredCombinedLogs = useMemo(
+    () =>
+      combinedLogs.filter((log) => {
+        const searchTermLower = safeToLowerCase(searchTerm)
+
+        const matchesSearch = !searchTermLower ||
+          safeToLowerCase(log.message).includes(searchTermLower) ||
+          safeToLowerCase(log.service).includes(searchTermLower) ||
+          safeToLowerCase(log.pid).includes(searchTermLower) ||
+          safeToLowerCase(log.hostname).includes(searchTermLower) ||
+          safeToLowerCase(log.unit).includes(searchTermLower)
+        const matchesLevel = levelFilter === "all" || log.level === levelFilter
+        const matchesService = serviceFilter === "all" || log.service === serviceFilter
+
+        return matchesSearch && matchesLevel && matchesService
+      }),
+    [combinedLogs, searchTerm, levelFilter, serviceFilter],
+  )
+
+  const displayedLogs = filteredCombinedLogs.slice(0, displayedLogsCount)
+  const hasMoreLogs = displayedLogsCount < filteredCombinedLogs.length
+
+  const getLevelColor = (level: string) => {
+    switch (level) {
+      case "error":
+      case "critical":
+      case "emergency":
+      case "alert":
+        return "bg-red-500/10 text-red-500 border-red-500/20"
+      case "warning":
+        return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
+      case "info":
+      case "notice":
+        return "bg-blue-500/10 text-blue-500 border-blue-500/20"
+      case "success":
+        return "bg-green-500/10 text-green-500 border-green-500/20"
+      default:
+        return "bg-gray-500/10 text-gray-500 border-gray-500/20"
+    }
+  }
+
+  const levelLabel = (level: string) => {
+    const key = `systemLogs.levels.${safeToLowerCase(level)}`
+    const translated = t(key)
+    return translated === key ? String(level).toUpperCase() : translated
+  }
+
+  const getLevelIcon = (level: string) => {
+    switch (level) {
+      case "error":
+      case "critical":
+      case "emergency":
+      case "alert":
+        return <XCircle className="h-3 w-3 mr-1" />
+      case "warning":
+        return <AlertTriangle className="h-3 w-3 mr-1" />
+      case "info":
+      case "notice":
+        return <Info className="h-3 w-3 mr-1" />
+      case "success":
+        return <CheckCircle className="h-3 w-3 mr-1" />
+      default:
+        return <CheckCircle className="h-3 w-3 mr-1" />
+    }
+  }
+
+  const getNotificationIcon = (type: string) => {
+    switch (type) {
+      case "email":
+        return <Mail className="h-4 w-4 text-blue-500" />
+      case "webhook":
+        return <Activity className="h-4 w-4 text-purple-500" />
+      case "alert":
+        return <AlertTriangle className="h-4 w-4 text-yellow-500" />
+      case "error":
+        return <XCircle className="h-4 w-4 text-red-500" />
+      case "success":
+        return <CheckCircle className="h-4 w-4 text-green-500" />
+      default:
+        return <Bell className="h-4 w-4 text-gray-500" />
+    }
+  }
+
+  const getNotificationTypeColor = (type: string) => {
+    if (!type) return "bg-gray-500/10 text-gray-500 border-gray-500/20"
+
+    switch (safeToLowerCase(type)) {
+      case "error":
+        return "bg-red-500/10 text-red-500 border-red-500/20"
+      case "warning":
+        return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20"
+      case "info":
+        return "bg-blue-500/10 text-blue-500 border-blue-500/20"
+      case "success":
+        return "bg-green-500/10 text-green-500 border-green-500/20"
+      default:
+        return "bg-gray-500/10 text-gray-500 border-gray-500/20"
+    }
+  }
+
+  const getNotificationSourceColor = (source: string) => {
+    if (!source) return "bg-gray-500/10 text-gray-500 border-gray-500/20"
+
+    switch (safeToLowerCase(source)) {
+      case "task-log":
+        return "bg-purple-500/10 text-purple-500 border-purple-500/20"
+      case "journal":
+        return "bg-cyan-500/10 text-cyan-500 border-cyan-500/20"
+      case "system":
+        return "bg-orange-500/10 text-orange-500 border-orange-500/20"
+      default:
+        return "bg-gray-500/10 text-gray-500 border-gray-500/20"
+    }
+  }
+
+  const logCounts = {
+    total: logs.length,
+    error: logs.filter((log) => ["error", "critical", "emergency", "alert"].includes(log.level)).length,
+    warning: logs.filter((log) => log.level === "warning").length,
+    info: logs.filter((log) => ["info", "notice", "debug"].includes(log.level)).length,
+  }
+
+  const uniqueServices = useMemo(
+    () => [...new Set(logs.map((log) => log.service).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [logs],
+  )
+
+  const getBackupType = (volid: string): "vm" | "lxc" => {
+    if (volid.includes("/vm/") || volid.includes("vzdump-qemu")) {
+      return "vm"
+    }
+    return "lxc"
+  }
+
+  const getBackupTypeColor = (volid: string) => {
+    const type = getBackupType(volid)
+    return type === "vm"
+      ? "bg-cyan-500/10 text-cyan-500 border-cyan-500/20"
+      : "bg-orange-500/10 text-orange-500 border-orange-500/20"
+  }
+
+  const getBackupTypeLabel = (volid: string) => {
+    const type = getBackupType(volid)
+    return type === "vm" ? "VM" : "LXC"
+  }
+
+  const getBackupStorageType = (volid: string): "pbs" | "pve" => {
+    // PBS backups have format: storage:backup/type/vmid/timestamp
+    // PVE backups have format: storage:backup/vzdump-type-vmid-timestamp.vma.zst
+    if (volid.includes(":backup/vm/") || volid.includes(":backup/ct/")) {
+      return "pbs"
+    }
+    return "pve"
+  }
+
+  const getBackupStorageColor = (volid: string) => {
+    const type = getBackupStorageType(volid)
+    return type === "pbs"
+      ? "bg-purple-500/10 text-purple-500 border-purple-500/20"
+      : "bg-blue-500/10 text-blue-500 border-blue-500/20"
+  }
+
+  const getBackupStorageLabel = (volid: string) => {
+    const type = getBackupStorageType(volid)
+    return type === "pbs" ? "PBS" : "PVE"
+  }
+
+  const backupStats = {
+    total: backups.length,
+    totalSize: backups.reduce((sum, b) => sum + b.size, 0),
+    qemu: backups.filter((b) => {
+      // Check if volid contains /vm/ for QEMU or vzdump-qemu for PVE
+      return b.volid.includes("/vm/") || b.volid.includes("vzdump-qemu")
+    }).length,
+    lxc: backups.filter((b) => {
+      // Check if volid contains /ct/ for LXC or vzdump-lxc for PVE
+      return b.volid.includes("/ct/") || b.volid.includes("vzdump-lxc")
+    }).length,
+  }
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return "0 B"
+    const k = 1024
+    const sizes = ["B", "KB", "MB", "GB", "TB"]
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`
+  }
+
+  const getSectionIcon = (section: string) => {
+    switch (section) {
+      case "logs":
+        return <Terminal className="h-4 w-4" />
+      case "events":
+        return <Activity className="h-4 w-4" />
+      case "backups":
+        return <Database className="h-4 w-4" />
+      case "notifications":
+        return <Bell className="h-4 w-4" />
+      default:
+        return <Terminal className="h-4 w-4" />
+    }
+  }
+
+  const getSectionLabel = (section: string) => {
+    switch (section) {
+      case "logs":
+        return t("systemLogs.tabs.logs")
+      case "events":
+        return t("systemLogs.tabs.events")
+      case "backups":
+        return t("systemLogs.tabs.backups")
+      case "notifications":
+        return t("systemLogs.tabs.notifications")
+      default:
+        return t("systemLogs.tabs.logs")
+    }
+  }
+
+  if (loading && logs.length === 0 && events.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] gap-4">
+        <div className="relative">
+          <div className="h-12 w-12 rounded-full border-2 border-muted"></div>
+          <div className="absolute inset-0 h-12 w-12 rounded-full border-2 border-transparent border-t-primary animate-spin"></div>
+        </div>
+        <div className="text-sm font-medium text-foreground">{t("systemLogs.loading.title")}</div>
+        <p className="text-xs text-muted-foreground">{t("systemLogs.loading.description")}</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6 w-full max-w-full overflow-hidden">
+      {loading && (logs.length > 0 || events.length > 0) && (
+        <div className="fixed inset-0 bg-background/60 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3 p-6 rounded-xl bg-card border border-border shadow-xl">
+            <div className="relative">
+              <div className="h-10 w-10 rounded-full border-2 border-muted"></div>
+              <div className="absolute inset-0 h-10 w-10 rounded-full border-2 border-transparent border-t-primary animate-spin"></div>
+            </div>
+            <div className="text-sm font-medium text-foreground">{t("systemLogs.loading.title")}</div>
+          </div>
+        </div>
+      )}
+
+      {/* Statistics Cards */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 xl:gap-6">
+        <Card className="bg-card border-border">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t("systemLogs.cards.totalEntries")}</CardTitle>
+            <FileText className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-foreground">
+              {(logsCounts?.total ?? 0).toLocaleString(language)}
+            </div>
+            <p className="text-xs text-muted-foreground mt-2">{t("systemLogs.cards.selectedRange")}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t("systemLogs.cards.errors")}</CardTitle>
+            <XCircle className="h-4 w-4 text-red-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-500">{(logsCounts?.errors ?? 0).toLocaleString(language)}</div>
+            <p className="text-xs text-muted-foreground mt-2">{t("systemLogs.cards.requiresAttention")}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t("systemLogs.cards.warnings")}</CardTitle>
+            <AlertTriangle className="h-4 w-4 text-yellow-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-yellow-500">{(logsCounts?.warnings ?? 0).toLocaleString(language)}</div>
+            <p className="text-xs text-muted-foreground mt-2">{t("systemLogs.cards.monitorClosely")}</p>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-card border-border">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">{t("systemLogs.cards.backups")}</CardTitle>
+            <Database className="h-4 w-4 text-blue-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-500">{backupStats.total.toLocaleString(language)}</div>
+            <p className="text-xs text-muted-foreground mt-2">{formatBytes(backupStats.totalSize)}</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Main Content with Tabs */}
+      <Card className="bg-card border-border w-full max-w-full overflow-hidden">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-foreground flex items-center">
+              <Activity className="h-5 w-5 mr-2" />
+              {t("systemLogs.title")}
+            </CardTitle>
+            <Button variant="outline" size="sm" onClick={refreshData} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
+              {t("actions.refresh")}
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="max-w-full overflow-hidden">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full max-w-full">
+            <TabsList className="hidden md:grid w-full grid-cols-3">
+              <TabsTrigger value="logs" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">
+                <Terminal className="h-4 w-4 mr-2" />
+                {t("systemLogs.tabs.logs")}
+              </TabsTrigger>
+              <TabsTrigger value="backups" className="data-[state=active]:bg-blue-500 data-[state=active]:text-white">
+                <Database className="h-4 w-4 mr-2" />
+                {t("systemLogs.tabs.backups")}
+              </TabsTrigger>
+              <TabsTrigger
+                value="notifications"
+                className="data-[state=active]:bg-blue-500 data-[state=active]:text-white"
+              >
+                <Bell className="h-4 w-4 mr-2" />
+                {t("systemLogs.tabs.notifications")}
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="md:hidden mb-4">
+              <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
+                <SheetTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className={`w-full justify-start gap-2 ${
+                      activeTab === "logs" || activeTab === "backups" || activeTab === "notifications"
+                        ? "bg-blue-500/10 text-blue-500"
+                        : "bg-transparent"
+                    }`}
+                  >
+                    <Menu className="h-4 w-4" />
+                    {getSectionIcon(activeTab)}
+                    <span>{getSectionLabel(activeTab)}</span>
+                  </Button>
+                </SheetTrigger>
+                <SheetContent side="left" className="w-[280px]">
+                  <SheetHeader>
+                    <SheetTitle>{t("systemLogs.sections")}</SheetTitle>
+                  </SheetHeader>
+                  <div className="mt-6 space-y-2">
+                    <Button
+                      variant="ghost"
+                      className={`w-full justify-start gap-2 ${
+                        activeTab === "logs"
+                          ? "bg-blue-500/10 text-blue-500 border-l-4 border-blue-500 rounded-l-none"
+                          : ""
+                      }`}
+                      onClick={() => {
+                        setActiveTab("logs")
+                        setIsMobileMenuOpen(false)
+                      }}
+                    >
+                      <Terminal className="h-4 w-4" />
+                      {t("systemLogs.tabs.logs")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className={`w-full justify-start gap-2 ${
+                        activeTab === "backups"
+                          ? "bg-blue-500/10 text-blue-500 border-l-4 border-blue-500 rounded-l-none"
+                          : ""
+                      }`}
+                      onClick={() => {
+                        setActiveTab("backups")
+                        setIsMobileMenuOpen(false)
+                      }}
+                    >
+                      <Database className="h-4 w-4" />
+                      {t("systemLogs.tabs.backups")}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      className={`w-full justify-start gap-2 ${
+                        activeTab === "notifications"
+                          ? "bg-blue-500/10 text-blue-500 border-l-4 border-blue-500 rounded-l-none"
+                          : ""
+                      }`}
+                      onClick={() => {
+                        setActiveTab("notifications")
+                        setIsMobileMenuOpen(false)
+                      }}
+                    >
+                      <Bell className="h-4 w-4" />
+                      {t("systemLogs.tabs.notifications")}
+                    </Button>
+                  </div>
+                </SheetContent>
+              </Sheet>
+            </div>
+
+            {/* Logs Tab - Ahora incluye logs y eventos unificados */}
+            <TabsContent value="logs" className="space-y-4 max-w-full overflow-hidden">
+              <div className="flex flex-col sm:flex-row gap-4 max-w-full">
+                <div className="flex-1 min-w-0">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder={t("systemLogs.filters.searchPlaceholder")}
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-10 bg-background border-border"
+                    />
+                  </div>
+                </div>
+
+                <Select value={dateFilter} onValueChange={setDateFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px] bg-background border-border">
+                    <SelectValue placeholder={t("systemLogs.filters.timeRange")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">{t("systemLogs.filters.oneDay")}</SelectItem>
+                    <SelectItem value="3">{t("systemLogs.filters.threeDays")}</SelectItem>
+                    <SelectItem value="7">{t("systemLogs.filters.oneWeek")}</SelectItem>
+                    <SelectItem value="14">{t("systemLogs.filters.twoWeeks")}</SelectItem>
+                    <SelectItem value="30">{t("systemLogs.filters.oneMonth")}</SelectItem>
+                    <SelectItem value="custom">{t("systemLogs.filters.customDays")}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                {dateFilter === "custom" && (
+                  <Input
+                    type="number"
+                    placeholder={t("systemLogs.filters.daysAgoPlaceholder")}
+                    value={customDays}
+                    onChange={(e) => setCustomDays(e.target.value)}
+                    className="w-full sm:w-[120px] bg-background border-border"
+                    min="1"
+                  />
+                )}
+
+                <Select value={levelFilter} onValueChange={setLevelFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px] bg-background border-border">
+                    <SelectValue placeholder={t("systemLogs.filters.byLevel")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("systemLogs.filters.allLevels")}</SelectItem>
+                    <SelectItem value="error">{t("systemLogs.levels.error")}</SelectItem>
+                    <SelectItem value="warning">{t("systemLogs.levels.warning")}</SelectItem>
+                    <SelectItem value="info">{t("systemLogs.levels.info")}</SelectItem>
+                  </SelectContent>
+                </Select>
+
+                <Select value={serviceFilter} onValueChange={setServiceFilter}>
+                  <SelectTrigger className="w-full sm:w-[180px] bg-background border-border">
+                    <SelectValue placeholder={t("systemLogs.filters.byService")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem key="service-all" value="all">
+                      {t("systemLogs.filters.allServices")}
+                    </SelectItem>
+                    {uniqueServices.map((service) => (
+                      <SelectItem key={`service-${service}`} value={service}>
+                        {service}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Button variant="outline" className="border-border bg-transparent" onClick={handleDownloadLogs}>
+                  <Download className="h-4 w-4 mr-2" />
+                  {t("systemLogs.export.button")}
+                </Button>
+              </div>
+
+              <ScrollArea className="h-[600px] w-full rounded-md border border-border overflow-hidden [&>div]:!max-w-full [&>div>div]:!max-w-full">
+                <div className="space-y-2 p-4 w-full min-w-0">
+                  {displayedLogs.map((log, index) => {
+                    // Generate a more stable unique key
+                    const timestampMs = new Date(log.timestamp).getTime()
+                    const uniqueKey = log.eventData
+                      ? `event-${log.eventData.upid.replace(/:/g, "-")}-${timestampMs}`
+                      : `log-${timestampMs}-${log.service?.substring(0, 10) || "unknown"}-${log.pid || "nopid"}-${index}`
+
+                    return (
+                      <div
+                        key={uniqueKey}
+                        className="flex flex-col md:flex-row md:items-start space-y-2 md:space-y-0 md:space-x-4 p-3 rounded-lg border border-white/10 sm:border-border bg-white/5 sm:bg-card sm:hover:bg-white/5 transition-colors cursor-pointer overflow-hidden w-full max-w-full min-w-0"
+                        onClick={() => {
+                          if (log.eventData) {
+                            setSelectedEvent(log.eventData)
+                            setIsEventModalOpen(true)
+                          } else {
+                            setSelectedLog(log as SystemLog)
+                            setIsLogModalOpen(true)
+                          }
+                        }}
+                      >
+                        <div className="flex-shrink-0 flex gap-2 flex-wrap">
+                          <Badge variant="outline" className={getLevelColor(log.level)}>
+                            {getLevelIcon(log.level)}
+                            {levelLabel(log.level)}
+                          </Badge>
+                          {log.eventData && (
+                            <Badge variant="outline" className="bg-purple-500/10 text-purple-500 border-purple-500/20">
+                              <Activity className="h-3 w-3 mr-1" />
+                              {t("systemLogs.badges.event")}
+                            </Badge>
+                          )}
+                        </div>
+
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-1 gap-1">
+                            <div className="text-sm font-medium text-foreground truncate min-w-0">{log.service}</div>
+                            <div className="text-xs text-muted-foreground font-mono truncate sm:ml-2 sm:flex-shrink-0">
+                              {log.timestamp}
+                            </div>
+                          </div>
+                          <div className="text-sm text-foreground mb-1 line-clamp-2 break-words overflow-hidden">
+                            {log.message}
+                          </div>
+                          <div className="text-xs text-muted-foreground truncate overflow-hidden">
+                            {log.source}
+                            {log.unit && log.unit !== log.service && ` • ${t("systemLogs.fields.unit")}: ${log.unit}`}
+                            {log.pid && ` • PID: ${log.pid}`}
+                            {log.hostname && ` • ${t("systemLogs.fields.host")}: ${log.hostname}`}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {displayedLogs.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>{t("systemLogs.empty.logs")}</p>
+                    </div>
+                  )}
+
+                  {hasMoreLogs && (
+                    <div className="flex justify-center pt-4 w-full">
+                      <Button
+                        variant="outline"
+                        onClick={() => setDisplayedLogsCount((prev) => prev + 200)}
+                        className="border-border"
+                      >
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        {t("systemLogs.loadMore", { count: filteredCombinedLogs.length - displayedLogsCount })}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            {/* Backups Tab */}
+            <TabsContent value="backups" className="space-y-4">
+              <div className="space-y-4 mb-4">
+                {/* First row: VM and LXC backups */}
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <Card className="bg-card/50 border-border">
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold text-cyan-500">{backupStats.qemu}</div>
+                      <p className="text-xs text-muted-foreground mt-1">{t("systemLogs.backups.vm")}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-card/50 border-border">
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold text-orange-500">{backupStats.lxc}</div>
+                      <p className="text-xs text-muted-foreground mt-1">{t("systemLogs.backups.lxc")}</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="bg-card/50 border-border hidden md:block">
+                    <CardContent className="pt-6">
+                      <div className="text-2xl font-bold text-foreground">{formatBytes(backupStats.totalSize)}</div>
+                      <p className="text-xs text-muted-foreground mt-1">{t("systemLogs.backups.totalSize")}</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Second row: Total Size (mobile only, full width) */}
+                <Card className="bg-card/50 border-border md:hidden">
+                  <CardContent className="pt-6">
+                    <div className="text-2xl font-bold text-foreground">{formatBytes(backupStats.totalSize)}</div>
+                    <p className="text-xs text-muted-foreground mt-1">{t("systemLogs.backups.totalSize")}</p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              <ScrollArea className="h-[500px] w-full rounded-md border border-border">
+                <div className="space-y-2 p-4">
+                  {backups.map((backup, index) => {
+                    const uniqueKey = `backup-${backup.volid.replace(/[/:]/g, "-")}-${backup.timestamp || index}`
+
+                    return (
+                      <div
+                        key={uniqueKey}
+                        className="flex items-start space-x-4 p-3 rounded-lg border border-white/10 sm:border-border bg-white/5 sm:bg-card sm:hover:bg-white/5 transition-colors cursor-pointer"
+                        onClick={() => {
+                          setSelectedBackup(backup)
+                          setIsBackupModalOpen(true)
+                        }}
+                      >
+                        <div className="flex-shrink-0">
+                          <HardDrive className="h-5 w-5 text-blue-500" />
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1 gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline" className={getBackupTypeColor(backup.volid)}>
+                                {getBackupTypeLabel(backup.volid)}
+                              </Badge>
+                              <Badge variant="outline" className={getBackupStorageColor(backup.volid)}>
+                                {getBackupStorageLabel(backup.volid)}
+                              </Badge>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className="bg-green-500/10 text-green-500 border-green-500/20 whitespace-nowrap"
+                            >
+                              {backup.size_human}
+                            </Badge>
+                          </div>
+                          <div className="text-xs text-muted-foreground mb-1 truncate">{t("systemLogs.fields.storage")}: {backup.storage}</div>
+                          <div className="text-xs text-muted-foreground flex items-center">
+                            <Calendar className="h-3 w-3 mr-1 flex-shrink-0" />
+                            <span className="truncate">{backup.created}</span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {backups.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Database className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>{t("systemLogs.empty.backups")}</p>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+
+            {/* Notifications Tab */}
+            <TabsContent value="notifications" className="space-y-4">
+              <ScrollArea className="h-[600px] w-full rounded-md border border-border">
+                <div className="space-y-2 p-4">
+                  {notifications.map((notification, index) => {
+                    const timestampMs = new Date(notification.timestamp).getTime()
+                    const uniqueKey = `notification-${timestampMs}-${notification.service?.substring(0, 10) || "unknown"}-${notification.source?.substring(0, 10) || "unknown"}-${index}`
+
+                    return (
+                      <div
+                        key={uniqueKey}
+                        className="flex flex-col md:flex-row md:items-start space-y-2 md:space-y-0 md:space-x-4 p-3 rounded-lg border border-white/10 sm:border-border bg-white/5 sm:bg-card sm:hover:bg-white/5 transition-colors cursor-pointer overflow-hidden w-full"
+                        onClick={() => {
+                          setSelectedNotification(notification)
+                          setIsNotificationModalOpen(true)
+                        }}
+                      >
+                        <div className="flex-shrink-0 flex gap-2 flex-wrap">
+                          <Badge variant="outline" className={getNotificationTypeColor(notification.type)}>
+                            {notification.type ? levelLabel(notification.type) : t("app.unknown")}
+                          </Badge>
+                          <Badge variant="outline" className={getNotificationSourceColor(notification.source)}>
+                            {notification.source === "task-log" && <Activity className="h-3 w-3 mr-1" />}
+                            {notification.source === "journal" && <FileText className="h-3 w-3 mr-1" />}
+                            {notification.source ? notification.source.toUpperCase() : t("app.unknown")}
+                          </Badge>
+                        </div>
+
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-1 gap-1">
+                            <div className="text-sm font-medium text-foreground truncate">{notification.service}</div>
+                            <div className="text-xs text-muted-foreground font-mono truncate">
+                              {notification.timestamp}
+                            </div>
+                          </div>
+                          <div className="text-sm text-foreground mb-1 line-clamp-2 break-all overflow-hidden">
+                            {notification.message}
+                          </div>
+                          <div className="text-xs text-muted-foreground break-words overflow-hidden">
+                            {t("systemLogs.fields.service")}: {notification.service} • {t("systemLogs.fields.source")}: {notification.source}
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {notifications.length === 0 && (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Bell className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>{t("systemLogs.empty.notifications")}</p>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      <Dialog open={isLogModalOpen} onOpenChange={setIsLogModalOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              {t("systemLogs.modals.logTitle")}
+            </DialogTitle>
+            <DialogDescription>{t("systemLogs.modals.logDescription")}</DialogDescription>
+          </DialogHeader>
+          {selectedLog && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.level")}</div>
+                  <Badge variant="outline" className={getLevelColor(selectedLog.level)}>
+                    {getLevelIcon(selectedLog.level)}
+                    {levelLabel(selectedLog.level)}
+                  </Badge>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.service")}</div>
+                  <div className="text-sm text-foreground break-all overflow-hidden">{selectedLog.service}</div>
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.timestamp")}</div>
+                  <div className="text-sm text-foreground font-mono break-all overflow-hidden">
+                    {selectedLog.timestamp}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.source")}</div>
+                  <div className="text-sm text-foreground break-all overflow-hidden">{selectedLog.source}</div>
+                </div>
+                {selectedLog.unit && (
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.systemdUnit")}</div>
+                    <div className="text-sm text-foreground font-mono break-all overflow-hidden">{selectedLog.unit}</div>
+                  </div>
+                )}
+                {selectedLog.pid && (
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.processId")}</div>
+                    <div className="text-sm text-foreground font-mono">{selectedLog.pid}</div>
+                  </div>
+                )}
+                {selectedLog.hostname && (
+                  <div className="sm:col-span-2">
+                    <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.hostname")}</div>
+                    <div className="text-sm text-foreground break-all overflow-hidden">{selectedLog.hostname}</div>
+                  </div>
+                )}
+              </div>
+              <div>
+                <div className="text-sm font-medium text-muted-foreground mb-2">{t("systemLogs.fields.message")}</div>
+                <div className="p-4 rounded-lg bg-muted/50 border border-border overflow-hidden">
+                  <pre className="text-sm text-foreground whitespace-pre-wrap break-all overflow-hidden">
+                    {selectedLog.message}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isEventModalOpen} onOpenChange={setIsEventModalOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="h-5 w-5" />
+              {t("systemLogs.modals.eventTitle")}
+            </DialogTitle>
+            <DialogDescription>{t("systemLogs.modals.eventDescription")}</DialogDescription>
+          </DialogHeader>
+          {selectedEvent && (
+            <div className="space-y-4">
+              <div className="flex gap-2">
+                <Badge variant="outline" className={getLevelColor(selectedEvent.level)}>
+                  {getLevelIcon(selectedEvent.level)}
+                  {levelLabel(selectedEvent.level)}
+                </Badge>
+                <Badge variant="outline" className="bg-purple-500/10 text-purple-500 border-purple-500/20">
+                  <Activity className="h-3 w-3 mr-1" />
+                  {t("systemLogs.badges.event")}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.message")}</div>
+                  <div className="text-sm text-foreground break-words">{selectedEvent.status}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.type")}</div>
+                  <div className="text-sm text-foreground break-words">{selectedEvent.type}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.node")}</div>
+                  <div className="text-sm text-foreground">{selectedEvent.node}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.user")}</div>
+                  <div className="text-sm text-foreground break-words">{selectedEvent.user}</div>
+                </div>
+                {selectedEvent.vmid && (
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground mb-1">VM/CT ID</div>
+                    <div className="text-sm text-foreground font-mono">{selectedEvent.vmid}</div>
+                  </div>
+                )}
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.duration")}</div>
+                  <div className="text-sm text-foreground">{selectedEvent.duration}</div>
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.startTime")}</div>
+                  <div className="text-sm text-foreground break-words">{selectedEvent.starttime}</div>
+                </div>
+                <div className="sm:col-span-2">
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.endTime")}</div>
+                  <div className="text-sm text-foreground break-words">{selectedEvent.endtime}</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-muted-foreground mb-2">UPID</div>
+                <div className="p-4 rounded-lg bg-muted/50 border border-border">
+                  <pre className="text-sm text-foreground font-mono whitespace-pre-wrap break-all">
+                    {selectedEvent.upid}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isBackupModalOpen} onOpenChange={setIsBackupModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5" />
+              {t("systemLogs.modals.backupTitle")}
+            </DialogTitle>
+            <DialogDescription>{t("systemLogs.modals.backupDescription")}</DialogDescription>
+          </DialogHeader>
+          {selectedBackup && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.type")}</div>
+                  <Badge variant="outline" className={getBackupTypeColor(selectedBackup.volid)}>
+                    {getBackupTypeLabel(selectedBackup.volid)}
+                  </Badge>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.storageType")}</div>
+                  <Badge variant="outline" className={getBackupStorageColor(selectedBackup.volid)}>
+                    {getBackupStorageLabel(selectedBackup.volid)}
+                  </Badge>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.storage")}</div>
+                  <div className="text-sm text-foreground break-words">{selectedBackup.storage}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.size")}</div>
+                  <Badge variant="outline" className="bg-green-500/10 text-green-500 border-green-500/20">
+                    {selectedBackup.size_human}
+                  </Badge>
+                </div>
+                {selectedBackup.vmid && (
+                  <div>
+                    <div className="text-sm font-medium text-muted-foreground mb-1">VM/CT ID</div>
+                    <div className="text-sm text-foreground font-mono">{selectedBackup.vmid}</div>
+                  </div>
+                )}
+                <div className="sm:col-span-2">
+                  <div className="text-sm font-medium text-muted-foreground mb-1">{t("systemLogs.fields.created")}</div>
+                  <div className="text-sm text-foreground break-words">{selectedBackup.created}</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-muted-foreground mb-2">{t("systemLogs.fields.volumeId")}</div>
+                <div className="p-4 rounded-lg bg-muted/50 border border-border">
+                  <pre className="text-sm text-foreground font-mono whitespace-pre-wrap break-all">
+                    {selectedBackup.volid}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isNotificationModalOpen} onOpenChange={setIsNotificationModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto w-[96vw] sm:w-full mx-2 sm:mx-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg pr-8">
+              <Bell className="h-4 w-4 sm:h-5 sm:w-5 flex-shrink-0" />
+              <span className="truncate">{t("systemLogs.modals.notificationTitle")}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {t("systemLogs.modals.notificationDescription")}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedNotification && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                <div>
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1.5">{t("systemLogs.fields.type")}</div>
+                  <Badge variant="outline" className={`${getNotificationTypeColor(selectedNotification.type)} text-xs`}>
+                    {selectedNotification.type ? levelLabel(selectedNotification.type) : t("app.unknown")}
+                  </Badge>
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1.5">{t("systemLogs.fields.timestamp")}</div>
+                  <div className="text-xs sm:text-sm text-foreground font-mono break-all">
+                    {selectedNotification.timestamp}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1.5">{t("systemLogs.fields.service")}</div>
+                  <div className="text-xs sm:text-sm text-foreground break-words">{selectedNotification.service}</div>
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-1.5">{t("systemLogs.fields.source")}</div>
+                  <div className="text-xs sm:text-sm text-foreground break-words">{selectedNotification.source}</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs sm:text-sm font-medium text-muted-foreground mb-2">{t("systemLogs.fields.message")}</div>
+                <div className="p-3 sm:p-4 rounded-lg bg-muted/50 border border-border max-h-[180px] sm:max-h-[300px] overflow-y-auto">
+                  <pre className="text-xs sm:text-sm text-foreground whitespace-pre-wrap break-all font-mono">
+                    {selectedNotification.message}
+                  </pre>
+                </div>
+              </div>
+              <div className="flex justify-end pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => handleDownloadNotificationLog(selectedNotification)}
+                  className="border-border w-full sm:w-auto text-xs sm:text-sm h-9 sm:h-10"
+                >
+                  <Download className="h-3 w-3 sm:h-4 sm:w-4 mr-2" />
+                  <span className="truncate">{t("systemLogs.download.completeMessageButton")}</span>
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}

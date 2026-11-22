@@ -1,0 +1,929 @@
+"use client"
+
+import type React from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import {
+  Activity,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  CornerDownLeft,
+  GripHorizontal,
+  ChevronDown,
+  Search,
+  Send,
+  Lightbulb,
+  Terminal,
+  Trash2,
+  X,
+  Copy,
+  Clipboard,
+} from "lucide-react"
+import { copyTerminalSelection, pasteFromClipboard } from "@/lib/terminal-clipboard"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu"
+import { DialogHeader, DialogDescription } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Dialog as SearchDialog, DialogContent as SearchDialogContent, DialogTitle as SearchDialogTitle } from "@/components/ui/dialog"
+import "xterm/css/xterm.css"
+import { API_PORT, fetchApi } from "@/lib/api-config"
+import { getTicketedWsUrl } from "@/lib/terminal-ws"
+import { useT } from "@/lib/i18n/provider"
+
+interface LxcTerminalModalProps {
+  open: boolean
+  onClose: () => void
+  vmid: number
+  vmName: string
+}
+
+interface CheatSheetResult {
+  command: string
+  description: string
+  examples: string[]
+}
+
+const LXC_COMMANDS = [
+  { cmd: "ls -la", descKey: "listFiles" },
+  { cmd: "cd /path/to/dir", descKey: "changeDirectory" },
+  { cmd: "cat filename", descKey: "displayFile" },
+  { cmd: "grep 'pattern' file", descKey: "searchPattern" },
+  { cmd: "find . -name 'file'", descKey: "findFiles" },
+  { cmd: "df -h", descKey: "diskUsage" },
+  { cmd: "du -sh *", descKey: "directorySizes" },
+  { cmd: "free -h", descKey: "memoryUsage" },
+  { cmd: "top", descKey: "runningProcesses" },
+  { cmd: "ps aux | grep process", descKey: "findProcess" },
+  { cmd: "systemctl status service", descKey: "serviceStatus" },
+  { cmd: "systemctl restart service", descKey: "restartService" },
+  { cmd: "apt update && apt upgrade", descKey: "updatePackages" },
+  { cmd: "apt install package", descKey: "installPackage" },
+  { cmd: "tail -f /var/log/syslog", descKey: "followLog" },
+  { cmd: "chmod 755 file", descKey: "changePermissions" },
+  { cmd: "chown user:group file", descKey: "changeOwner" },
+  { cmd: "tar -xzf file.tar.gz", descKey: "extractArchive" },
+  { cmd: "docker ps", descKey: "listContainers" },
+  { cmd: "docker images", descKey: "listImages" },
+  { cmd: "ip addr show", descKey: "showIpAddresses" },
+  { cmd: "ping host", descKey: "testConnectivity" },
+  { cmd: "curl -I url", descKey: "httpHeaders" },
+  { cmd: "history", descKey: "commandHistory" },
+  { cmd: "clear", descKey: "clearScreen" },
+] as const
+
+type LocalCommand = { cmd: string; desc: string }
+
+function getWebSocketUrl(): string {
+  if (typeof window === "undefined") {
+    return "ws://localhost:8008/ws/terminal"
+  }
+
+  const { protocol, hostname, port } = window.location
+  const isStandardPort = port === "" || port === "80" || port === "443"
+  const wsProtocol = protocol === "https:" ? "wss:" : "ws:"
+
+  if (isStandardPort) {
+    return `${wsProtocol}//${hostname}/ws/terminal`
+  } else {
+    return `${wsProtocol}//${hostname}:${API_PORT}/ws/terminal`
+  }
+}
+
+export function LxcTerminalModal({
+  open: isOpen,
+  onClose,
+  vmid,
+  vmName,
+}: LxcTerminalModalProps) {
+  const t = useT()
+  const termRef = useRef<any>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const fitAddonRef = useRef<any>(null)
+  const terminalContainerRef = useRef<HTMLDivElement>(null)
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "online" | "offline">("connecting")
+  const [isMobile, setIsMobile] = useState(false)
+  const [isTablet, setIsTablet] = useState(false)
+  const isInsideLxcRef = useRef(false)
+  const outputBufferRef = useRef<string>("")
+
+  const [modalHeight, setModalHeight] = useState(500)
+  const [isResizing, setIsResizing] = useState(false)
+  const resizeBarRef = useRef<HTMLDivElement>(null)
+  const modalHeightRef = useRef(500)
+
+  // Search state
+  const [searchModalOpen, setSearchModalOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const localCommands = useMemo<LocalCommand[]>(
+    () => LXC_COMMANDS.map((item) => ({ cmd: item.cmd, desc: t(`lxcTerminal.commands.${item.descKey}`) })),
+    [t],
+  )
+  const [filteredCommands, setFilteredCommands] = useState<LocalCommand[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [searchResults, setSearchResults] = useState<CheatSheetResult[]>([])
+  const [useOnline, setUseOnline] = useState(true)
+
+  useEffect(() => {
+    setFilteredCommands(localCommands)
+  }, [localCommands])
+
+  // Detect mobile/tablet
+  useEffect(() => {
+    const checkDevice = () => {
+      const width = window.innerWidth
+      setIsMobile(width < 640)
+      setIsTablet(width >= 640 && width < 1024)
+    }
+    checkDevice()
+    window.addEventListener("resize", checkDevice)
+    return () => window.removeEventListener("resize", checkDevice)
+  }, [])
+
+  // Cleanup on close
+  useEffect(() => {
+    if (!isOpen) {
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current)
+        pingIntervalRef.current = null
+      }
+      if (wsRef.current) {
+        wsRef.current.close()
+        wsRef.current = null
+      }
+      if (termRef.current) {
+        termRef.current.dispose()
+        termRef.current = null
+      }
+      setConnectionStatus("connecting")
+      isInsideLxcRef.current = false
+      outputBufferRef.current = ""
+    }
+  }, [isOpen])
+
+  // Initialize terminal
+  useEffect(() => {
+    if (!isOpen) return
+
+    // `cancelled` short-circuits the async init if the modal closes
+    // before the dynamic xterm import resolves. Without this, we'd
+    // construct a Terminal instance, attach it to a now-stale ref, and
+    // open a WebSocket that nobody listens to.
+    let cancelled = false
+
+    // Small delay to ensure Dialog content is rendered
+    const initTimeout = setTimeout(() => {
+      if (cancelled || !terminalContainerRef.current) return
+      initTerminal()
+    }, 100)
+
+    const initTerminal = async () => {
+      const [TerminalClass, FitAddonClass] = await Promise.all([
+        import("xterm").then((mod) => mod.Terminal),
+        import("xterm-addon-fit").then((mod) => mod.FitAddon),
+      ])
+      if (cancelled) return
+
+      const fontSize = window.innerWidth < 768 ? 12 : 16
+
+      const term = new TerminalClass({
+        rendererType: "dom",
+        fontFamily: '"MesloLGS NF", "FiraCode Nerd Font", "JetBrainsMono Nerd Font", "Hack Nerd Font", "Symbols Nerd Font", "Courier", "Courier New", "Liberation Mono", "DejaVu Sans Mono", monospace',
+        fontSize: fontSize,
+        lineHeight: 1,
+        cursorBlink: true,
+        scrollback: 2000,
+        disableStdin: false,
+        customGlyphs: true,
+        fontWeight: "500",
+        fontWeightBold: "700",
+        theme: {
+          background: "#000000",
+          foreground: "#ffffff",
+          cursor: "#ffffff",
+          cursorAccent: "#000000",
+          black: "#2e3436",
+          red: "#cc0000",
+          green: "#4e9a06",
+          yellow: "#c4a000",
+          blue: "#3465a4",
+          magenta: "#75507b",
+          cyan: "#06989a",
+          white: "#d3d7cf",
+          brightBlack: "#555753",
+          brightRed: "#ef2929",
+          brightGreen: "#8ae234",
+          brightYellow: "#fce94f",
+          brightBlue: "#729fcf",
+          brightMagenta: "#ad7fa8",
+          brightCyan: "#34e2e2",
+          brightWhite: "#eeeeec",
+        },
+      })
+
+      const fitAddon = new FitAddonClass()
+      term.loadAddon(fitAddon)
+
+      if (terminalContainerRef.current) {
+        term.open(terminalContainerRef.current)
+        fitAddon.fit()
+      }
+
+      termRef.current = term
+      fitAddonRef.current = fitAddon
+
+      // Connect WebSocket to host terminal. We append a single-use ticket
+      // (`?ticket=...`) which the backend consumes on handshake — see
+      // lib/terminal-ws.ts and AppImage/scripts/flask_terminal_routes.py.
+      const wsUrl = getWebSocketUrl()
+      const ws = new WebSocket(await getTicketedWsUrl(wsUrl))
+      wsRef.current = ws
+      
+// Reset state for new connection
+  isInsideLxcRef.current = false
+  outputBufferRef.current = ""
+
+      ws.onopen = () => {
+        setConnectionStatus("online")
+
+        // Start heartbeat ping
+        pingIntervalRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping' }))
+          } else {
+            if (pingIntervalRef.current) {
+              clearInterval(pingIntervalRef.current)
+            }
+          }
+        }, 25000)
+
+        // Sync terminal size
+        fitAddon.fit()
+        ws.send(JSON.stringify({
+          type: "resize",
+          cols: term.cols,
+          rows: term.rows,
+        }))
+        
+        // Auto-execute pct enter after connection is ready.
+        // The string is sent verbatim to the bash PTY, so a non-numeric
+        // `vmid` would land as shell input (e.g. `pct enter ; rm -rf /`).
+        // The prop is typed `number` but JSON / URL query injections can
+        // sneak strings in; validate as a defensive redundancy. Audit
+        // residual #lxc-terminal-vmid-injection.
+        setTimeout(() => {
+          if (ws.readyState !== WebSocket.OPEN) return
+          // Coerce + verify: must be a positive integer that round-trips
+          // through Number without losing fidelity.
+          const id = Number(vmid)
+          if (!Number.isInteger(id) || id <= 0 || id >= 1_000_000) {
+            term.writeln(`\r\n\x1b[31m[ERROR] ${t("lxcTerminal.errors.invalidVmid")}\x1b[0m`)
+            return
+          }
+          ws.send(`pct enter ${id}\r`)
+        }, 300)
+      }
+
+      ws.onerror = () => {
+        setConnectionStatus("offline")
+        term.writeln(`\r\n\x1b[31m[ERROR] ${t("terminal.websocketError")}\x1b[0m`)
+      }
+
+      ws.onclose = () => {
+        setConnectionStatus("offline")
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current)
+        }
+        term.writeln(`\r\n\x1b[33m[INFO] ${t("terminal.connectionClosed")}\x1b[0m`)
+      }
+
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data)
+        }
+      })
+      
+      ws.onmessage = (event) => {
+        // Filter out pong responses
+        if (event.data === '{"type": "pong"}' || event.data === '{"type":"pong"}') {
+          return
+        }
+        
+        // Helper to strip ANSI escape codes for pattern matching
+        const stripAnsi = (str: string) => str.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+        
+        // Buffer output until we detect we're inside the LXC
+        // pct enter always enters directly without login prompt when run as root
+        if (!isInsideLxcRef.current) {
+          outputBufferRef.current += event.data
+          
+          const buffer = outputBufferRef.current
+          const cleanBuffer = stripAnsi(buffer)
+          
+          // Look for pct enter command followed by a new prompt
+          const pctEnterMatch = cleanBuffer.match(/pct enter (\d+)\r?\n/)
+          
+          if (pctEnterMatch) {
+            const afterPctEnter = cleanBuffer.substring(cleanBuffer.indexOf(pctEnterMatch[0]) + pctEnterMatch[0].length)
+            
+            // Extract the host name from the prompt BEFORE pct enter (e.g., "root@amd").
+            // Charset widened to accept dotted FQDNs (`proxmox.lan`) and unicode
+            // letters/numbers (host names like `próxmox` or non-Latin scripts).
+            // The previous `[a-zA-Z0-9_-]` truncated the hostname and the
+            // "are we inside the LXC?" comparison then misfired.
+            const hostPromptMatch = cleanBuffer.match(/@([\p{L}\p{N}._-]+).*pct enter/u)
+            const hostName = hostPromptMatch ? hostPromptMatch[1] : null
+
+            // Look for a new prompt after pct enter that ends with # or $
+            // This works for both bash (user@host:~#) and ash/Alpine ([user@host /]#)
+            const promptMatch = afterPctEnter.match(/[@\[]([\p{L}\p{N}._-]+)[^\r\n]*[#$]\s*$/u)
+            
+            if (promptMatch) {
+              const lxcHostname = promptMatch[1]
+              
+              // If we found a prompt with a DIFFERENT hostname than the Proxmox host,
+              // we're inside the LXC container
+              if (!hostName || lxcHostname !== hostName) {
+                isInsideLxcRef.current = true
+                
+                // Find the original prompt with ANSI codes to display it properly
+                const afterPctEnterWithAnsi = buffer.substring(buffer.indexOf('pct enter') + pctEnterMatch[0].length)
+                
+                // Write the LXC prompt (last line with # or $)
+                const lastPromptMatch = afterPctEnterWithAnsi.match(/[^\r\n]*[#$]\s*$/)
+                if (lastPromptMatch) {
+                  term.write(lastPromptMatch[0])
+                }
+                
+                // Detect if this is Alpine/ash shell by checking prompt format
+                // Alpine uses: [root@hostname ~]# or [root@hostname /]#
+                // Other distros use: root@hostname:/# or root@hostname:~#
+                const isAlpine = afterPctEnter.match(/\[[^\]]+@[^\]]+\s+[^\]]*\][#$]/)
+                
+                if (isAlpine) {
+                  // Send an extra Enter ONLY for Alpine containers (ash shell)
+                  // This forces the prompt to refresh properly
+                  setTimeout(() => {
+                    if (ws.readyState === WebSocket.OPEN) {
+                      ws.send('\r')
+                    }
+                  }, 100)
+                }
+                
+                return
+              }
+
+              // The host prompt came back: pct enter could not enter the
+              // container. Show why and close, so the session is never left
+              // on the host shell under the container's name.
+              const reason = afterPctEnter.split(/\r?\n/).slice(0, -1)
+                .map((line) => line.trim()).filter(Boolean).join("\r\n")
+              if (reason) term.writeln(`\x1b[31m${reason}\x1b[0m`)
+              term.writeln(`\r\n\x1b[33m${/Failed to exec/.test(reason)
+                ? t("lxcTerminal.errors.noShell")
+                : t("lxcTerminal.errors.enterFailed")}\x1b[0m`)
+              isInsideLxcRef.current = true
+              ws.close()
+              return
+            }
+          }
+        } else {
+          // Already inside LXC, write directly
+          term.write(event.data)
+        }
+      }
+    }
+
+    return () => {
+      cancelled = true
+      clearTimeout(initTimeout)
+      if (pingIntervalRef.current) {
+        clearInterval(pingIntervalRef.current)
+      }
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+      if (termRef.current) {
+        termRef.current.dispose()
+      }
+    }
+  }, [isOpen, vmid, t])
+
+  // Resize handling
+  useEffect(() => {
+    if (termRef.current && fitAddonRef.current && isOpen) {
+      setTimeout(() => {
+        fitAddonRef.current?.fit()
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: "resize",
+            cols: termRef.current.cols,
+            rows: termRef.current.rows,
+          }))
+        }
+      }, 100)
+    }
+  }, [modalHeight, isOpen])
+
+  // Resize bar handlers
+  const handleResizeStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+    modalHeightRef.current = modalHeight
+  }, [modalHeight])
+
+  useEffect(() => {
+    if (!isResizing) return
+
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
+      const windowHeight = window.innerHeight
+      const newHeight = windowHeight - clientY - 20
+      const clampedHeight = Math.max(300, Math.min(windowHeight - 100, newHeight))
+      modalHeightRef.current = clampedHeight
+      setModalHeight(clampedHeight)
+    }
+
+    const handleEnd = () => {
+      setIsResizing(false)
+    }
+
+    document.addEventListener("mousemove", handleMove)
+    document.addEventListener("mouseup", handleEnd)
+    document.addEventListener("touchmove", handleMove)
+    document.addEventListener("touchend", handleEnd)
+
+    return () => {
+      document.removeEventListener("mousemove", handleMove)
+      document.removeEventListener("mouseup", handleEnd)
+      document.removeEventListener("touchmove", handleMove)
+      document.removeEventListener("touchend", handleEnd)
+    }
+  }, [isResizing])
+
+  // Send key helpers for mobile/tablet
+  const sendKey = useCallback((key: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(key)
+    }
+  }, [])
+
+  const sendEsc = useCallback(() => sendKey("\x1b"), [sendKey])
+  const sendTab = useCallback(() => sendKey("\t"), [sendKey])
+  const sendArrowUp = useCallback(() => sendKey("\x1b[A"), [sendKey])
+  const sendArrowDown = useCallback(() => sendKey("\x1b[B"), [sendKey])
+  const sendArrowLeft = useCallback(() => sendKey("\x1b[D"), [sendKey])
+  const sendArrowRight = useCallback(() => sendKey("\x1b[C"), [sendKey])
+  const sendEnter = useCallback(() => sendKey("\r"), [sendKey])
+  const sendCtrlC = useCallback(() => sendKey("\x03"), [sendKey]) // Ctrl+C
+
+  // Mobile clipboard helpers — see lib/terminal-clipboard.ts for the rationale.
+  const handleCopy = useCallback(async () => {
+    await copyTerminalSelection(termRef.current)
+  }, [])
+  const handlePaste = useCallback(async () => {
+    await pasteFromClipboard(sendKey)
+  }, [sendKey])
+
+  // Search effect - debounced search with cheat.sh
+  useEffect(() => {
+    const searchCheatSh = async (query: string) => {
+      if (!query.trim()) {
+        setSearchResults([])
+        setFilteredCommands(localCommands)
+        return
+      }
+
+      try {
+        setIsSearching(true)
+        const searchEndpoint = `/api/terminal/search-command?q=${encodeURIComponent(query)}`
+        const data = await fetchApi<{ success: boolean; examples: any[] }>(searchEndpoint, {
+          method: "GET",
+          signal: AbortSignal.timeout(10000),
+        })
+
+        if (!data.success || !data.examples || data.examples.length === 0) {
+          throw new Error(t("terminal.noExamplesFound"))
+        }
+
+        const formattedResults: CheatSheetResult[] = data.examples.map((example: any) => ({
+          command: example.command,
+          description: example.description || "",
+          examples: [example.command],
+        }))
+
+        setUseOnline(true)
+        setSearchResults(formattedResults)
+      } catch (error) {
+        const filtered = localCommands.filter(
+          (item) =>
+            item.cmd.toLowerCase().includes(query.toLowerCase()) ||
+            item.desc.toLowerCase().includes(query.toLowerCase()),
+        )
+        setFilteredCommands(filtered)
+        setSearchResults([])
+        setUseOnline(false)
+      } finally {
+        setIsSearching(false)
+      }
+    }
+
+    const debounce = setTimeout(() => {
+      if (searchQuery && searchQuery.length >= 2) {
+        searchCheatSh(searchQuery)
+      } else {
+        setSearchResults([])
+        setFilteredCommands(localCommands)
+      }
+    }, 800)
+
+    return () => clearTimeout(debounce)
+  }, [searchQuery, localCommands, t])
+
+  const handleClear = useCallback(() => {
+    if (termRef.current) {
+      termRef.current.clear()
+    }
+  }, [])
+
+  const sendToTerminal = useCallback((command: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(command)
+      setTimeout(() => {
+        setSearchModalOpen(false)
+      }, 100)
+    }
+  }, [])
+
+  const showMobileControls = isMobile || isTablet
+
+  return (
+    <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent
+        className="max-w-4xl w-[95vw] p-0 gap-0 bg-black border-border overflow-hidden flex flex-col"
+        style={{ height: `${modalHeight}px` }}
+        hideClose
+      >
+        {/* Resize bar */}
+        <div
+          ref={resizeBarRef}
+          className="h-3 w-full cursor-ns-resize flex items-center justify-center bg-zinc-900 hover:bg-zinc-800 transition-colors touch-none"
+          onMouseDown={handleResizeStart}
+          onTouchStart={handleResizeStart}
+        >
+          <GripHorizontal className="h-4 w-4 text-zinc-500" />
+        </div>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-b border-zinc-800">
+          <DialogTitle className="text-sm font-medium text-white">
+            {t("lxcTerminal.title", { name: vmName, id: vmid })}
+          </DialogTitle>
+          <div className="flex gap-2">
+            <Button
+              onClick={() => setSearchModalOpen(true)}
+              variant="outline"
+              size="sm"
+              disabled={connectionStatus !== "online"}
+              className="h-8 gap-2 bg-blue-600/20 hover:bg-blue-600/30 border-blue-600/50 text-blue-400 disabled:opacity-50"
+            >
+              <Search className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("terminal.search")}</span>
+            </Button>
+            <Button
+              onClick={handleClear}
+              variant="outline"
+              size="sm"
+              disabled={connectionStatus !== "online"}
+              className="h-8 gap-2 bg-yellow-600/20 hover:bg-yellow-600/30 border-yellow-600/50 text-yellow-400 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              <span className="hidden sm:inline">{t("terminal.clear")}</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Terminal container */}
+        <div className="flex-1 overflow-hidden bg-black p-1">
+          <div
+            ref={terminalContainerRef}
+            className="w-full h-full"
+            style={{ minHeight: "200px" }}
+          />
+        </div>
+
+        {/* Mobile/Tablet control buttons */}
+        {showMobileControls && (
+          <div className="px-2 py-2 bg-zinc-900 border-t border-zinc-800">
+            <div className="flex items-center justify-center gap-1.5">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendEsc}
+                className="h-8 px-2 text-xs bg-zinc-800 border-zinc-700 text-zinc-300"
+              >
+                ESC
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendTab}
+                className="h-8 px-2 text-xs bg-zinc-800 border-zinc-700 text-zinc-300"
+              >
+                TAB
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendArrowUp}
+                className="h-8 w-8 p-0 bg-zinc-800 border-zinc-700"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendArrowDown}
+                className="h-8 w-8 p-0 bg-zinc-800 border-zinc-700"
+              >
+                <ArrowDown className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendArrowLeft}
+                className="h-8 w-8 p-0 bg-zinc-800 border-zinc-700"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendArrowRight}
+                className="h-8 w-8 p-0 bg-zinc-800 border-zinc-700"
+              >
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={sendEnter}
+                className="h-8 px-2 text-xs bg-blue-600/20 border-blue-600/50 text-blue-400 hover:bg-blue-600/30"
+              >
+                <CornerDownLeft className="h-4 w-4 mr-1" />
+                Enter
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 px-2 text-xs bg-zinc-800 border-zinc-700 text-zinc-300 gap-1"
+                  >
+                    Ctrl
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">{t("scriptTerminal.controlSequences")}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onSelect={() => sendKey("\x03")}>
+                    <span className="font-mono text-xs mr-2">Ctrl+C</span>
+                    <span className="text-muted-foreground text-xs">{t("scriptTerminal.cancelInterrupt")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => sendKey("\x04")}>
+                    <span className="font-mono text-xs mr-2">Ctrl+D</span>
+                    <span className="text-muted-foreground text-xs">{t("scriptTerminal.endOfInput")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => sendKey("\x18")}>
+                    <span className="font-mono text-xs mr-2">Ctrl+X</span>
+                    <span className="text-muted-foreground text-xs">{t("scriptTerminal.exitNano")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => sendKey("\x12")}>
+                    <span className="font-mono text-xs mr-2">Ctrl+R</span>
+                    <span className="text-muted-foreground text-xs">{t("scriptTerminal.searchHistory")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-xs text-muted-foreground">{t("scriptTerminal.clipboard")}</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={() => { void handleCopy() }}>
+                    <Copy className="h-3.5 w-3.5 mr-2" />
+                    <span className="text-xs">{t("scriptTerminal.copySelection")}</span>
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => { void handlePaste() }}>
+                    <Clipboard className="h-3.5 w-3.5 mr-2" />
+                    <span className="text-xs">{t("scriptTerminal.paste")}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        )}
+
+        {/* Status bar at bottom */}
+        <div className="flex items-center justify-between px-4 py-2 bg-zinc-900 border-t border-zinc-800">
+          <div className="flex items-center gap-3">
+            <Activity className="h-5 w-5 text-blue-500" />
+            <div
+              className={`w-2 h-2 rounded-full ${
+                connectionStatus === "online"
+                  ? "bg-green-500"
+                  : connectionStatus === "connecting"
+                    ? "bg-yellow-500 animate-pulse"
+                    : "bg-red-500"
+              }`}
+            />
+            <span className="text-xs text-zinc-400">{t(`scriptTerminal.${connectionStatus}`)}</span>
+          </div>
+          <Button
+            onClick={onClose}
+            variant="outline"
+            size="sm"
+            className="h-8 gap-2 bg-red-600/20 hover:bg-red-600/30 border-red-600/50 text-red-400"
+          >
+            <X className="h-4 w-4" />
+            <span className="hidden sm:inline">{t("actions.close")}</span>
+          </Button>
+        </div>
+      </DialogContent>
+
+      {/* Search Commands Modal */}
+      <SearchDialog open={searchModalOpen} onOpenChange={setSearchModalOpen}>
+        <SearchDialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-4 border-b border-zinc-800">
+            <SearchDialogTitle className="text-xl font-semibold">{t("terminal.searchCommands")}</SearchDialogTitle>
+            <div className="flex items-center gap-2">
+              <div
+                className={`w-2 h-2 rounded-full ${useOnline ? "bg-green-500" : "bg-red-500"}`}
+                title={useOnline ? t("terminal.onlineSource") : t("terminal.offlineSource")}
+              />
+            </div>
+          </DialogHeader>
+
+          <DialogDescription className="sr-only">{t("terminal.searchDescription")}</DialogDescription>
+
+          <div className="space-y-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+              <Input
+                placeholder={t("terminal.searchPlaceholder")}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 bg-zinc-900 border-zinc-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-base"
+                autoCapitalize="none"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </div>
+
+            {isSearching && (
+              <div className="text-center py-4 text-zinc-400">
+                <div className="animate-spin inline-block w-6 h-6 border-2 border-current border-t-transparent rounded-full mb-2" />
+                <p className="text-sm">{t("terminal.searchingCheatSh")}</p>
+              </div>
+            )}
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2 max-h-[50vh]">
+              {searchResults.length > 0 ? (
+                <>
+                  {searchResults.map((result, index) => (
+                    <div
+                      key={index}
+                      className="p-4 rounded-lg border border-zinc-700 bg-zinc-800/50 hover:border-zinc-600 transition-colors"
+                    >
+                      {result.description && (
+                        <p className="text-xs text-zinc-400 mb-2 leading-relaxed"># {result.description}</p>
+                      )}
+                      <div
+                        onClick={() => sendToTerminal(result.command)}
+                        className="flex items-start justify-between gap-2 cursor-pointer group hover:bg-zinc-800/50 rounded p-2 -m-2"
+                      >
+                        <code className="text-sm text-blue-400 font-mono break-all flex-1">{result.command}</code>
+                        <Send className="h-4 w-4 text-zinc-600 group-hover:text-blue-400 flex-shrink-0 mt-0.5 transition-colors" />
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-center py-2">
+                    <p className="text-xs text-zinc-500">
+                      <Lightbulb className="inline-block w-3 h-3 mr-1" />
+                      {t("terminal.poweredByCheatSh")}
+                    </p>
+                  </div>
+                </>
+              ) : filteredCommands.length > 0 && !useOnline ? (
+                filteredCommands.map((item, index) => (
+                  <div
+                    key={index}
+                    onClick={() => sendToTerminal(item.cmd)}
+                    className="p-3 rounded-lg border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 hover:border-blue-500 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <code className="text-sm text-blue-400 font-mono break-all">{item.cmd}</code>
+                        <p className="text-xs text-zinc-400 mt-1">{item.desc}</p>
+                      </div>
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          sendToTerminal(item.cmd)
+                        }}
+                        size="sm"
+                        variant="ghost"
+                        className="shrink-0 h-7 px-2 text-xs"
+                      >
+                        <Send className="h-3 w-3 mr-1" />
+                        {t("terminal.send")}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : !isSearching && !searchQuery && !useOnline ? (
+                localCommands.map((item, index) => (
+                  <div
+                    key={index}
+                    onClick={() => sendToTerminal(item.cmd)}
+                    className="p-3 rounded-lg border border-zinc-700 bg-zinc-800/50 hover:bg-zinc-800 hover:border-blue-500 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <code className="text-sm text-blue-400 font-mono break-all">{item.cmd}</code>
+                        <p className="text-xs text-zinc-400 mt-1">{item.desc}</p>
+                      </div>
+                      <Button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          sendToTerminal(item.cmd)
+                        }}
+                        size="sm"
+                        variant="ghost"
+                        className="shrink-0 h-7 px-2 text-xs"
+                      >
+                        <Send className="h-3 w-3 mr-1" />
+                        {t("terminal.send")}
+                      </Button>
+                    </div>
+                  </div>
+                ))
+              ) : !isSearching ? (
+                <div className="text-center py-12 space-y-4">
+                  {searchQuery ? (
+                    <>
+                      <Search className="w-12 h-12 text-zinc-600 mx-auto" />
+                      <div>
+                        <p className="text-zinc-400 font-medium">{t("terminal.noResults", { query: searchQuery })}</p>
+                        <p className="text-xs text-zinc-500 mt-1">{t("terminal.tryDifferentSearch")}</p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Terminal className="w-12 h-12 text-zinc-600 mx-auto" />
+                      <div>
+                        <p className="text-zinc-400 font-medium mb-2">{t("terminal.searchAnyCommand")}</p>
+                        <div className="text-sm text-zinc-500 space-y-1">
+                          <p>{t("terminal.trySearchingFor")}</p>
+                          <div className="flex flex-wrap justify-center gap-2 mt-2">
+                            {["tar", "grep", "docker", "systemctl", "curl"].map((cmd) => (
+                              <code
+                                key={cmd}
+                                onClick={() => setSearchQuery(cmd)}
+                                className="px-2 py-1 bg-zinc-800 rounded text-blue-400 cursor-pointer hover:bg-zinc-700"
+                              >
+                                {cmd}
+                              </code>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                      {useOnline && (
+                        <div className="flex items-center justify-center gap-2 text-xs text-zinc-600 mt-4">
+                          <Lightbulb className="w-3 h-3" />
+                          <span>{t("terminal.poweredByCheatSh")}</span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              ) : null}
+            </div>
+
+            {useOnline && searchResults.length > 0 && (
+              <div className="pt-2 border-t border-zinc-800 text-xs text-zinc-500 text-right">
+                <span className="text-zinc-600">{t("terminal.poweredByCheatSh")}</span>
+              </div>
+            )}
+          </div>
+        </SearchDialogContent>
+      </SearchDialog>
+    </Dialog>
+  )
+}

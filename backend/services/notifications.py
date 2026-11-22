@@ -1,5 +1,5 @@
 """
-LinuxMenux Notification Orchestrator
+Linux Menux Notification Orchestrator
 Transports: Telegram, Discord, Gotify, SMTP Email, Pushover, Apprise.
 Includes rate limiting and SSRF protection.
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==========================================================
-# LinuxMenux - Uninstaller Script
+# Linux Menux - Uninstaller Script
 # Safely and completely removes LinuxMenux without touching Docker,
 # user data, Dokploy or system packages.
 # ==========================================================

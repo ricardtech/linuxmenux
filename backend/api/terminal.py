@@ -1,5 +1,5 @@
 """
-LinuxMenux Terminal WebSocket Handler
+Linux Menux Terminal WebSocket Handler
 Provides a secure PTY terminal session connected to xterm.js via WebSockets.
 Protected by short-lived (5-second TTL) single-use tickets.
 """

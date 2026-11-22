@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==========================================================
-# LinuxMenux - Multi-Distro Server Dashboard & Terminal
+# Linux Menux - Multi-Distro Server Dashboard & Terminal
 # Safe Installer for Arch/Manjaro, Debian/Ubuntu, RHEL/Rocky, openSUSE
 # ==========================================================
 
@@ -28,7 +28,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 echo -e "${BLUE}=====================================================${NC}"
-echo -e "${CYAN}    LinuxMenux - Painel de Controle Multi-Distro     ${NC}"
+echo -e "${CYAN}    Linux Menux - Painel de Controle Multi-Distro     ${NC}"
 echo -e "${BLUE}=====================================================${NC}"
 
 # 1. Detect Distribution

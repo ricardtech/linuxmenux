@@ -1,5 +1,5 @@
 """
-LinuxMenux Traefik Inspector
+Linux Menux Traefik Inspector
 Monitors Traefik proxy routes, entrypoints, and SSL/TLS certificates when used with Dokploy/Docker.
 """
 

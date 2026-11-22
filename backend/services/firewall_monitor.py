@@ -1,5 +1,5 @@
 """
-LinuxMenux Firewall Inspector
+Linux Menux Firewall Inspector
 Safely queries Iptables, Nftables, and UFW without altering running configurations.
 """
 

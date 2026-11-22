@@ -1,5 +1,5 @@
 """
-LinuxMenux System Metrics Collector
+Linux Menux System Metrics Collector
 Gathers CPU, Memory, Disks, Network, and Sensor metrics safely using /proc and system utilities.
 """
 

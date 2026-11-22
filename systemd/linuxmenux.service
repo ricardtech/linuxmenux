@@ -1,5 +1,5 @@
 [Unit]
-Description=LinuxMenux Monitor - Multi-Distro Web Dashboard & Terminal
+Description=Linux Menux Monitor - Multi-Distro Web Dashboard & Terminal
 After=network.target docker.service
 Wants=docker.service
 
