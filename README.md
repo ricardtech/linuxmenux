@@ -1,6 +1,9 @@
 # Linux Menux Monitor `v1.2.9` 🐧⚡
 
 [![Versão](https://img.shields.io/badge/versão-1.2.9-orange.svg)](./CHANGELOG.md)
+[![Forgejo](https://img.shields.io/badge/Forgejo-Self--Hosted-ea580c?logo=forgejo)](https://git.ricardtech.top/RicardTech/linuxmenux)
+[![GitLab](https://img.shields.io/badge/GitLab-Triplo--Push-fc6d26?logo=gitlab)](https://gitlab.com/ricard-tech/linuxmenux)
+[![Métricas](https://img.shields.io/badge/RicardTech-Metrics-0ea5e9)](https://git.ricardtech.top/RicardTech/ricardtech-metrics)
 [![Licença](https://img.shields.io/badge/licença-GPLv2-blue.svg)](./LICENSE)
 
 > Dashboard Web e Terminal Interativo para servidores Linux com suporte nativo a **Docker Swarm, Compose, Dokploy, Traefik, Firewall, Cloudflare R2 e Multi-Distro (BigLinux, Manjaro, Arch, Ubuntu, Debian, RHEL, Rocky, Alma, openSUSE, Fedora)**.
