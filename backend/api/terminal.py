@@ -9,6 +9,7 @@ import fcntl
 import os
 import pty
 import secrets
+import select
 import struct
 import termios
 import time
@@ -22,7 +23,6 @@ _TICKET_TTL = 5.0
 def issue_ticket() -> str:
     """Generate a single-use ticket valid for 5 seconds."""
     now = time.time()
-    # Prune expired
     for k in list(_terminal_tickets.keys()):
         if now - _terminal_tickets[k] > _TICKET_TTL:
             _terminal_tickets.pop(k, None)
@@ -44,74 +44,94 @@ def consume_ticket(ticket: str) -> bool:
 
 async def handle_terminal_session(websocket):
     """Bridge WebSocket with a local bash PTY session."""
-    # Spawn PTY
     master_fd, slave_fd = pty.openpty()
     shell = os.environ.get("SHELL", "/bin/bash")
+
+    # Set non-blocking on master_fd
+    flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
+    fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 
     proc = await asyncio.create_subprocess_exec(
         shell,
         stdin=slave_fd,
         stdout=slave_fd,
         stderr=slave_fd,
+        cwd=os.path.expanduser("~"),
         preexec_fn=os.setsid,
+        env=dict(os.environ, TERM="xterm-256color")
     )
     os.close(slave_fd)
 
-    # Set non-blocking on master_fd
-    flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
-    fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
     loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+
+    def sync_read():
+        while not stop_event.is_set():
+            r, _, _ = select.select([master_fd], [], [], 0.1)
+            if master_fd in r:
+                try:
+                    data = os.read(master_fd, 4096)
+                    if not data:  # EOF
+                        return None
+                    return data.decode("utf-8", errors="replace")
+                except OSError:
+                    return None
+            else:
+                continue
+        return None
 
     async def pty_to_ws():
         try:
-            while True:
-                data = await loop.run_in_executor(None, lambda: _read_pty(master_fd))
-                if not data:
+            while not stop_event.is_set():
+                chunk = await loop.run_in_executor(None, sync_read)
+                if chunk is None:
                     break
-                await websocket.send_text(data)
+                await websocket.send_text(chunk)
         except Exception:
             pass
+        finally:
+            stop_event.set()
 
     async def ws_to_pty():
         try:
-            while True:
+            while not stop_event.is_set():
                 msg = await websocket.receive_text()
-                # Check for resize message: e.g. {"resize": [rows, cols]}
-                if msg.startswith('{"resize":'):
+                if msg.startswith('{"type":"resize"') or msg.startswith('{"resize":') or '"resize"' in msg:
                     try:
                         import json
                         payload = json.loads(msg)
-                        rows, cols = payload["resize"]
-                        _set_pty_size(master_fd, rows, cols)
+                        rows = payload.get("rows")
+                        cols = payload.get("cols")
+                        if rows and cols:
+                            _set_pty_size(master_fd, int(rows), int(cols))
                     except Exception:
                         pass
+                elif msg == '{"type":"ping"}' or msg == '{"type": "ping"}':
+                    await websocket.send_text('{"type":"pong"}')
                 else:
                     os.write(master_fd, msg.encode("utf-8"))
         except Exception:
             pass
+        finally:
+            stop_event.set()
 
     task1 = asyncio.create_task(pty_to_ws())
     task2 = asyncio.create_task(ws_to_pty())
 
-    done, pending = await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
-    for t in pending:
-        t.cancel()
+    await asyncio.wait([task1, task2], return_when=asyncio.FIRST_COMPLETED)
+    stop_event.set()
+    task1.cancel()
+    task2.cancel()
 
     try:
         proc.terminate()
+        await proc.wait()
+    except Exception:
+        pass
+    try:
         os.close(master_fd)
     except OSError:
         pass
-
-
-def _read_pty(fd: int) -> Optional[str]:
-    try:
-        data = os.read(fd, 4096)
-        return data.decode("utf-8", errors="replace")
-    except (OSError, BlockingIOError):
-        time.sleep(0.02)
-        return ""
 
 
 def _set_pty_size(fd: int, rows: int, cols: int):

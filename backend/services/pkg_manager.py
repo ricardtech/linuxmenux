@@ -31,7 +31,7 @@ def is_update_in_progress() -> bool:
     return _current_update_job.get("active", False) or os.path.exists(UPDATE_LOCK_FILE)
 
 
-def check_updates() -> Dict[str, Any]:
+def check_updates(force_sync: bool = False) -> Dict[str, Any]:
     """
     Check for pending system updates according to the active package manager.
     Returns status, package count, and package list.
@@ -43,38 +43,54 @@ def check_updates() -> Dict[str, Any]:
         "distro": sys_info["distro_name"],
         "pending_count": 0,
         "packages": [],
-        "last_checked": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "last_checked": time.strftime("%d/%m/%Y %H:%M:%S"),
         "error": None,
     }
 
     try:
         if mgr == "pacman":
-            # Manjaro / Arch: checkupdates (part of pacman-contrib) or pacman -Qu
-            cmd = ["checkupdates"]
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-            if proc.returncode == 0:
-                lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
-                result["pending_count"] = len(lines)
-                for line in lines[:50]:
-                    parts = line.split()
-                    if len(parts) >= 4:
-                        result["packages"].append({
-                            "name": parts[0],
-                            "old_version": parts[1],
-                            "new_version": parts[3],
-                        })
-                    else:
-                        result["packages"].append({"name": line, "old_version": "", "new_version": ""})
-            elif proc.returncode == 2:
-                # Code 2 on checkupdates means no updates available
-                result["pending_count"] = 0
-            else:
-                # Fallback to pacman -Qu
+            # BigLinux / Manjaro: prefer pamac checkupdates when available
+            pamac_bin = shutil.which("pamac")
+            checkupdates_bin = shutil.which("checkupdates")
+            parsed_lines: List[str] = []
+
+            if pamac_bin:
+                proc = subprocess.run([pamac_bin, "checkupdates", "--no-aur", "-q"], capture_output=True, text=True, timeout=45)
+                if proc.returncode in (0, 100) and proc.stdout.strip():
+                    parsed_lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+
+            if not parsed_lines and checkupdates_bin:
+                env = os.environ.copy()
+                env["CHECKUPDATES_DB"] = "/tmp/linuxmenux-checkup-db"
+                proc = subprocess.run([checkupdates_bin], capture_output=True, text=True, timeout=45, env=env)
+                if proc.returncode == 0 and proc.stdout.strip():
+                    parsed_lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
+                elif proc.returncode == 2:
+                    parsed_lines = []
+
+            if not parsed_lines and not pamac_bin and not checkupdates_bin:
+                if force_sync:
+                    subprocess.run(["pacman", "-Sy", "--noconfirm"], capture_output=True, text=True, timeout=45)
                 fb_proc = subprocess.run(["pacman", "-Qu"], capture_output=True, text=True, timeout=15)
-                lines = [l.strip() for l in fb_proc.stdout.splitlines() if l.strip()]
-                result["pending_count"] = len(lines)
+                parsed_lines = [l.strip() for l in fb_proc.stdout.splitlines() if l.strip()]
+
+            result["pending_count"] = len(parsed_lines)
+            for line in parsed_lines[:60]:
+                parts = line.split()
+                if len(parts) >= 4:
+                    result["packages"].append({
+                        "name": parts[0],
+                        "old_version": parts[1],
+                        "new_version": parts[3],
+                    })
+                elif len(parts) >= 2:
+                    result["packages"].append({"name": parts[0], "old_version": "", "new_version": parts[-1]})
+                else:
+                    result["packages"].append({"name": line, "old_version": "", "new_version": ""})
 
         elif mgr == "apt":
+            if force_sync:
+                subprocess.run(["apt-get", "update", "-qq"], capture_output=True, text=True, timeout=45)
             # Debian / Ubuntu: apt-get -s dist-upgrade
             proc = subprocess.run(["apt-get", "-s", "dist-upgrade"], capture_output=True, text=True, timeout=30)
             if proc.returncode == 0:

@@ -7,7 +7,12 @@ Dokploy Stacks, Compose Projects, and Containers.
 import http.client
 import json
 import re
+import shutil
 import socket
+import subprocess
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, List, Optional
 
 
@@ -128,18 +133,88 @@ def list_swarm_services() -> List[Dict[str, Any]]:
     return services
 
 
+def _fmt_bytes_short(b: int) -> str:
+    if b <= 0:
+        return "0 B"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if b < 1024:
+            return f"{b:.1f} {unit}" if unit != "B" else f"{int(b)} B"
+        b /= 1024
+    return f"{b:.1f} PB"
+
+
+def _get_single_container_stats(container_id: str) -> Dict[str, Any]:
+    """Fetch live CPU, memory, net I/O and block I/O directly via Docker Unix socket."""
+    empty = {
+        "cpu_percent": 0.0,
+        "mem_percent": 0.0,
+        "mem_usage": "0 B / 0 B",
+        "net_rx": "0 B",
+        "net_tx": "0 B",
+        "block_read": "0 B",
+        "block_write": "0 B",
+    }
+    stats = docker_cli.request(f"/containers/{container_id}/stats?stream=false")
+    if not isinstance(stats, dict) or "error" in stats:
+        return empty
+    cpu_stats = stats.get("cpu_stats") or {}
+    pre_cpu = stats.get("precpu_stats") or {}
+    cpu_delta = (cpu_stats.get("cpu_usage", {}).get("total_usage", 0) or 0) - (
+        pre_cpu.get("cpu_usage", {}).get("total_usage", 0) or 0
+    )
+    sys_delta = (cpu_stats.get("system_cpu_usage", 0) or 0) - (
+        pre_cpu.get("system_cpu_usage", 0) or 0
+    )
+    online_cpus = cpu_stats.get("online_cpus") or len(cpu_stats.get("cpu_usage", {}).get("percpu_usage") or []) or 1
+    cpu_pct = round((cpu_delta / sys_delta) * online_cpus * 100.0, 2) if (sys_delta > 0 and cpu_delta > 0) else 0.0
+
+    mem_stats = stats.get("memory_stats") or {}
+    mem_used = int(mem_stats.get("usage", 0) or 0)
+    mem_limit = int(mem_stats.get("limit", 0) or 0)
+    mem_pct = round((mem_used / mem_limit) * 100.0, 1) if mem_limit > 0 else 0.0
+
+    net_rx = sum(int(v.get("rx_bytes", 0) or 0) for v in (stats.get("networks") or {}).values())
+    net_tx = sum(int(v.get("tx_bytes", 0) or 0) for v in (stats.get("networks") or {}).values())
+
+    blk_read = 0
+    blk_write = 0
+    for blk in (stats.get("blkio_stats") or {}).get("io_service_bytes_recursive") or []:
+        op = (blk.get("op") or "").lower()
+        val = int(blk.get("value", 0) or 0)
+        if op == "read":
+            blk_read += val
+        elif op == "write":
+            blk_write += val
+
+    return {
+        "cpu_percent": cpu_pct,
+        "mem_percent": mem_pct,
+        "mem_usage": f"{_fmt_bytes_short(mem_used)} / {_fmt_bytes_short(mem_limit)}",
+        "net_rx": _fmt_bytes_short(net_rx),
+        "net_tx": _fmt_bytes_short(net_tx),
+        "block_read": _fmt_bytes_short(blk_read),
+        "block_write": _fmt_bytes_short(blk_write),
+    }
+
+
 def list_containers(all_containers: bool = True) -> List[Dict[str, Any]]:
-    """List all containers on the host with status, Dokploy metadata, and Traefik domains."""
+    """List all containers on the host with status, Dokploy metadata, live stats, and Traefik domains."""
     path = f"/containers/json?all={'true' if all_containers else 'false'}"
     raw = docker_cli.request(path)
     if not isinstance(raw, list):
         return []
 
+    stats_map: Dict[str, Dict[str, Any]] = {}
+    for c in raw:
+        if c.get("State") == "running":
+            sid = c.get("Id", "")[:12]
+            stats_map[sid] = _get_single_container_stats(sid)
     result = []
     for c in raw:
         names = [n.lstrip("/") for n in c.get("Names", [])]
         name = names[0] if names else c.get("Id", "")[:12]
         labels = c.get("Labels", {})
+        short_id = c.get("Id", "")[:12]
 
         # Dokploy Compose vs Dokploy Swarm vs Standalone
         compose_project = labels.get("com.docker.compose.project")
@@ -168,6 +243,15 @@ def list_containers(all_containers: bool = True) -> List[Dict[str, Any]]:
             "created": c.get("Created", 0),
             "ports": c.get("Ports", []),
             "labels": labels,
+            "stats": stats_map.get(short_id, {
+                "cpu_percent": 0.0,
+                "mem_percent": 0.0,
+                "mem_usage": "0 B / 0 B",
+                "net_rx": "0 B",
+                "net_tx": "0 B",
+                "block_read": "0 B",
+                "block_write": "0 B",
+            }),
         })
     return result
 
@@ -235,3 +319,218 @@ def container_action(container_id: str, action: str) -> Dict[str, Any]:
     if isinstance(res, dict) and "error" in res:
         return {"success": False, "error": res["error"]}
     return {"success": True, "action": action, "container_id": container_id}
+
+
+_container_updates_lock = threading.Lock()
+_container_updates_cache: Dict[str, Any] = {"ts": 0.0, "items": []}
+_CONTAINER_UPDATES_TTL = 600.0
+
+
+def _inspect_single_container_updates(c: Dict[str, Any]) -> Dict[str, Any]:
+    cid = c.get("id", "")
+    name = c.get("name", cid)
+    image = c.get("image", "")
+    docker_bin = shutil.which("docker")
+    pending = 0
+    if docker_bin and c.get("state") == "running" and re.match(r"^[a-zA-Z0-9_.-]+$", cid):
+        script = (
+            "if command -v apt-get >/dev/null 2>&1; then "
+            "apt-get update -qq >/dev/null 2>&1 && apt-get -s upgrade 2>/dev/null | grep -c '^Inst '; "
+            "elif command -v apk >/dev/null 2>&1; then "
+            "apk update >/dev/null 2>&1 && apk list -u 2>/dev/null | wc -l; "
+            "elif command -v dnf >/dev/null 2>&1; then "
+            "dnf check-update -q 2>/dev/null | grep -c '^[a-zA-Z0-9]'; "
+            "else echo 0; fi"
+        )
+        try:
+            proc = subprocess.run([docker_bin, "exec", cid, "sh", "-c", script], capture_output=True, text=True, timeout=20)
+            out = proc.stdout.strip().splitlines()
+            if out and out[-1].strip().isdigit():
+                pending = int(out[-1].strip())
+        except Exception:
+            pass
+    return {"id": cid, "name": name, "image": image, "pending_count": pending, "has_update": pending > 0}
+
+
+def check_container_updates(force: bool = False) -> Dict[str, Any]:
+    """Detect pending package updates inside running Docker containers (Postgres, etc.)."""
+    now = time.time()
+    with _container_updates_lock:
+        if not force and _container_updates_cache["items"] and (now - _container_updates_cache["ts"]) < _CONTAINER_UPDATES_TTL:
+            items = _container_updates_cache["items"]
+            return {"updates": items, "total_with_updates": sum(1 for x in items if x["has_update"])}
+
+    running = [c for c in list_containers(all_containers=False) if c.get("state") == "running"]
+    items: List[Dict[str, Any]] = []
+    if running:
+        with ThreadPoolExecutor(max_workers=min(6, len(running))) as pool:
+            items = list(pool.map(_inspect_single_container_updates, running))
+
+    with _container_updates_lock:
+        _container_updates_cache["ts"] = now
+        _container_updates_cache["items"] = items
+
+    return {"updates": items, "total_with_updates": sum(1 for x in items if x["has_update"])}
+
+
+def update_container_packages(container_id: str) -> Dict[str, Any]:
+    """Update packages inside a running container safely."""
+    if not re.match(r"^[a-zA-Z0-9_.-]+$", container_id):
+        return {"success": False, "message": "ID de container inválido"}
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        return {"success": False, "message": "Docker CLI não encontrado"}
+
+    script = (
+        "if command -v apt-get >/dev/null 2>&1; then "
+        "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get upgrade -y; "
+        "elif command -v apk >/dev/null 2>&1; then "
+        "apk update && apk upgrade; "
+        "elif command -v dnf >/dev/null 2>&1; then "
+        "dnf upgrade -y; "
+        "else echo 'Gerenciador interno não suportado'; exit 1; fi"
+    )
+    try:
+        proc = subprocess.run([docker_bin, "exec", container_id, "sh", "-c", script], capture_output=True, text=True, timeout=180)
+        with _container_updates_lock:
+            _container_updates_cache["ts"] = 0.0
+        return {
+            "success": proc.returncode == 0,
+            "output": (proc.stdout + "\n" + proc.stderr).strip()[-4000:],
+        }
+    except Exception as exc:
+        return {"success": False, "message": str(exc)}
+
+
+def get_container_logs(container_id: str, tail: int = 100) -> Dict[str, Any]:
+    if not re.match(r"^[a-zA-Z0-9_.-]+$", container_id):
+        return {"logs": "ID inválido"}
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        return {"logs": "Docker CLI não encontrado"}
+    try:
+        proc = subprocess.run([docker_bin, "logs", "--tail", str(tail), container_id], capture_output=True, text=True, timeout=10)
+        return {"logs": (proc.stdout + proc.stderr).strip()}
+    except Exception as exc:
+        return {"logs": str(exc)}
+
+
+def get_container_detail(container_id: str) -> Dict[str, Any]:
+    """Return full inspection details, mounts, network/ports, and live stats for a container."""
+    if not re.match(r"^[a-zA-Z0-9_.-]+$", container_id):
+        return {"error": "ID de container inválido"}
+    info = docker_cli.request(f"/containers/{container_id}/json")
+    if not isinstance(info, dict) or "error" in info:
+        return {"error": (info or {}).get("error", "Container não encontrado")}
+
+    state_obj = info.get("State") or {}
+    config_obj = info.get("Config") or {}
+    host_cfg = info.get("HostConfig") or {}
+    net_settings = info.get("NetworkSettings") or {}
+    running = bool(state_obj.get("Running"))
+
+    cpu_pct = 0.0
+    mem_used = 0
+    mem_limit = 0
+    mem_pct = 0.0
+    net_rx = 0
+    net_tx = 0
+    blk_read = 0
+    blk_write = 0
+    pids = 0
+
+    if running:
+        stats = docker_cli.request(f"/containers/{container_id}/stats?stream=false")
+        if isinstance(stats, dict) and "error" not in stats:
+            cpu_stats = stats.get("cpu_stats") or {}
+            pre_cpu = stats.get("precpu_stats") or {}
+            cpu_delta = (cpu_stats.get("cpu_usage", {}).get("total_usage", 0) or 0) - (
+                pre_cpu.get("cpu_usage", {}).get("total_usage", 0) or 0
+            )
+            sys_delta = (cpu_stats.get("system_cpu_usage", 0) or 0) - (
+                pre_cpu.get("system_cpu_usage", 0) or 0
+            )
+            online_cpus = cpu_stats.get("online_cpus") or len(cpu_stats.get("cpu_usage", {}).get("percpu_usage") or []) or 1
+            if sys_delta > 0 and cpu_delta > 0:
+                cpu_pct = round((cpu_delta / sys_delta) * online_cpus * 100.0, 2)
+
+            mem_stats = stats.get("memory_stats") or {}
+            mem_used = int(mem_stats.get("usage", 0) or 0)
+            mem_limit = int(mem_stats.get("limit", 0) or 0)
+            if mem_limit > 0:
+                mem_pct = round((mem_used / mem_limit) * 100.0, 1)
+
+            for iface_data in (stats.get("networks") or {}).values():
+                net_rx += int(iface_data.get("rx_bytes", 0) or 0)
+                net_tx += int(iface_data.get("tx_bytes", 0) or 0)
+
+            for blk in (stats.get("blkio_stats") or {}).get("io_service_bytes_recursive") or []:
+                op = (blk.get("op") or "").lower()
+                val = int(blk.get("value", 0) or 0)
+                if op == "read":
+                    blk_read += val
+                elif op == "write":
+                    blk_write += val
+
+            pids = int((stats.get("pids_stats") or {}).get("current", 0) or 0)
+
+    mounts = [
+        {
+            "type": m.get("Type", "bind"),
+            "source": m.get("Source", ""),
+            "destination": m.get("Destination", ""),
+            "mode": m.get("Mode", ""),
+            "rw": bool(m.get("RW", True)),
+        }
+        for m in (info.get("Mounts") or [])
+    ]
+
+    ports = []
+    for c_port, bindings in (net_settings.get("Ports") or {}).items():
+        if isinstance(bindings, list) and bindings:
+            for b in bindings:
+                ports.append({
+                    "container_port": c_port,
+                    "host_ip": b.get("HostIp") or "0.0.0.0",
+                    "host_port": b.get("HostPort") or "",
+                })
+        else:
+            ports.append({"container_port": c_port, "host_ip": "-", "host_port": "-"})
+
+    networks = [
+        {
+            "name": net_name,
+            "ip": net_info.get("IPAddress") or "-",
+            "gateway": net_info.get("Gateway") or "-",
+            "mac": net_info.get("MacAddress") or "-",
+        }
+        for net_name, net_info in (net_settings.get("Networks") or {}).items()
+    ]
+
+    labels = config_obj.get("Labels") or {}
+    return {
+        "id": info.get("Id", "")[:12],
+        "full_id": info.get("Id", ""),
+        "name": (info.get("Name") or "").lstrip("/"),
+        "image": config_obj.get("Image", ""),
+        "state": state_obj.get("Status", "unknown"),
+        "running": running,
+        "started_at": state_obj.get("StartedAt", ""),
+        "restart_count": int(info.get("RestartCount", 0) or 0),
+        "restart_policy": (host_cfg.get("RestartPolicy") or {}).get("Name", "no"),
+        "traefik_domains": _extract_traefik_domains(labels),
+        "metrics": {
+            "cpu_percent": cpu_pct,
+            "mem_used": mem_used,
+            "mem_limit": mem_limit,
+            "mem_percent": mem_pct,
+            "net_rx": net_rx,
+            "net_tx": net_tx,
+            "blk_read": blk_read,
+            "blk_write": blk_write,
+            "pids": pids,
+        },
+        "mounts": mounts,
+        "ports": ports,
+        "networks": networks,
+    }

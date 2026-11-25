@@ -1,5 +1,14 @@
+# Python
 __pycache__/
 *.pyc
 venv/
 .env
 static/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend-nextjs-legacy/
+dist/
+.DS_Store

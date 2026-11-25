@@ -1,6 +1,9 @@
-# Linux Menux 🐧⚡
+# Linux Menux Monitor `v1.2.9` 🐧⚡
 
-> Dashboard Web e Terminal Interativo para servidores Linux com suporte nativo a **Docker Swarm, Dokploy, Traefik, Iptables e Multi-Distro (Ubuntu, Debian, Manjaro, Arch, RHEL, Rocky, Alma, openSUSE, Fedora)**.
+[![Versão](https://img.shields.io/badge/versão-1.2.9-orange.svg)](./CHANGELOG.md)
+[![Licença](https://img.shields.io/badge/licença-GPLv2-blue.svg)](./LICENSE)
+
+> Dashboard Web e Terminal Interativo para servidores Linux com suporte nativo a **Docker Swarm, Compose, Dokploy, Traefik, Firewall, Cloudflare R2 e Multi-Distro (BigLinux, Manjaro, Arch, Ubuntu, Debian, RHEL, Rocky, Alma, openSUSE, Fedora)**.
 
 Inspirado na usabilidade do [ProxMenux](https://github.com/MacRimi/ProxMenux), porém projetado do zero para servidores de aplicação e clusters Docker sem acoplamento a Proxmox VE.
 

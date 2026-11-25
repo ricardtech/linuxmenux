@@ -42,7 +42,7 @@ def detect_system_info() -> Dict[str, Any]:
     if distro_id in ("debian", "ubuntu", "linuxmint", "pop", "kali", "raspbian") or any(x in id_like for x in ("debian", "ubuntu")):
         family = "debian"
         pkg_manager = "apt"
-    elif distro_id in ("arch", "manjaro", "endeavouros", "garuda", "cachyos") or "arch" in id_like:
+    elif distro_id in ("arch", "manjaro", "biglinux", "endeavouros", "garuda", "cachyos") or "arch" in id_like:
         family = "arch"
         pkg_manager = "pacman"
     elif distro_id in ("rhel", "centos", "rocky", "almalinux", "fedora", "oracle") or any(x in id_like for x in ("rhel", "fedora", "centos")):

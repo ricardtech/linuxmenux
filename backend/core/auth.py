@@ -11,7 +11,9 @@ import secrets
 import time
 from typing import Dict, Any, Optional, Tuple
 
-AUTH_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+from core.paths import get_persistent_data_dir
+
+AUTH_DIR = get_persistent_data_dir()
 AUTH_FILE = os.path.join(AUTH_DIR, "auth.json")
 SECRET_FILE = os.path.join(AUTH_DIR, "jwt_secret.key")
 
@@ -52,13 +54,39 @@ def save_auth_config(cfg: Dict[str, Any]):
 def hash_password(password: str, salt: Optional[str] = None) -> Tuple[str, str]:
     if not salt:
         salt = secrets.token_hex(16)
-    hashed = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
-    return hashed, salt
+    dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200_000)
+    return f"pbkdf2_sha256${dk.hex()}", salt
 
 
 def verify_password(password: str, hashed: str, salt: str) -> bool:
+    if not hashed or not salt:
+        return False
+    if hashed.startswith("pbkdf2_sha256$"):
+        expected = hashed.split("$", 1)[1]
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), 200_000).hex()
+        return hmac.compare_digest(dk, expected)
+    # Legacy SHA-256 fallback
     calc = hashlib.sha256((salt + password).encode("utf-8")).hexdigest()
     return hmac.compare_digest(calc, hashed)
+
+
+def verify_api_token(raw_token: str) -> Optional[str]:
+    """Verify an lmx_* API token against persistent api_tokens.json."""
+    if not raw_token or not raw_token.startswith("lmx_"):
+        return None
+    tokens_file = os.path.join(AUTH_DIR, "api_tokens.json")
+    if not os.path.exists(tokens_file):
+        return None
+    try:
+        with open(tokens_file, "r", encoding="utf-8") as f:
+            items = json.load(f)
+        token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        for item in items:
+            if hmac.compare_digest(item.get("token_hash", ""), token_hash):
+                return item.get("name", "api-token")
+    except Exception:
+        pass
+    return None
 
 
 def generate_jwt(username: str) -> str:

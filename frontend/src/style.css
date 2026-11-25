@@ -1,0 +1,157 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  --background: oklch(0.22 0 0);
+  --foreground: oklch(0.97 0 0);
+  --card: oklch(0.24 0 0);
+  --card-border: oklch(0.32 0 0);
+  --muted: oklch(0.26 0 0);
+  --muted-foreground: oklch(0.72 0 0);
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  margin: 0;
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+/* ProxMenux readable typography scale across all pages */
+.text-xs {
+  font-size: 0.875rem !important;
+  line-height: 1.35 !important;
+}
+.text-sm {
+  font-size: 1rem !important;
+  line-height: 1.45 !important;
+}
+
+.font-mono {
+  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Light Theme Parity (ProxMenux) */
+.light-theme {
+  background-color: #f4f4f5 !important;
+  color: #18181b !important;
+}
+.light-theme header,
+.light-theme nav,
+.light-theme footer {
+  background-color: #ffffff !important;
+  border-color: #e4e4e7 !important;
+}
+.light-theme .bg-\[\#18181b\],
+.light-theme .bg-\[\#202024\],
+.light-theme .bg-\[\#1f1f23\] {
+  background-color: #ffffff !important;
+  border-color: #e4e4e7 !important;
+}
+.light-theme .bg-zinc-900,
+.light-theme .bg-zinc-900\/80,
+.light-theme .bg-zinc-900\/70,
+.light-theme .bg-zinc-900\/60,
+.light-theme .bg-zinc-800\/60 {
+  background-color: #f4f4f5 !important;
+  border-color: #e4e4e7 !important;
+}
+.light-theme .text-white,
+.light-theme .text-zinc-100,
+.light-theme .text-zinc-200 {
+  color: #18181b !important;
+}
+.light-theme .text-zinc-300,
+.light-theme .text-zinc-400 {
+  color: #52525b !important;
+}
+.light-theme .border-zinc-800,
+.light-theme .border-zinc-700 {
+  border-color: #d4d4d8 !important;
+}
+
+/* Custom dark scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #18181b;
+}
+::-webkit-scrollbar-thumb {
+  background: #2e2e33;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3e3e44;
+}
+
+/* ─── Network Flow Animations (Fiel ao ProxMenux) ─── */
+.nf-beam-rx, .nf-beam-tx {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 18 100;
+  animation: nf-beam 1.5s linear infinite;
+}
+.nf-beam-rx { stroke: #10b981; }
+.nf-beam-tx { stroke: #3b82f6; animation-direction: reverse; }
+
+@keyframes nf-beam {
+  to { stroke-dashoffset: -118; }
+}
+
+.nf-beam-head-rx, .nf-beam-head-tx {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 8 110;
+  animation: nf-beam-head 1.5s linear infinite;
+  filter: drop-shadow(0 0 3px currentColor);
+}
+.nf-beam-head-rx { stroke: #34d399; color: #10b981; }
+.nf-beam-head-tx { stroke: #60a5fa; color: #3b82f6; animation-direction: reverse; }
+
+@keyframes nf-beam-head {
+  to { stroke-dashoffset: -118; }
+}
+
+.nf-guest-halo {
+  fill: none;
+  stroke-width: 2;
+  opacity: 0;
+  animation: nf-halo 1.8s ease-out infinite;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+@keyframes nf-halo {
+  0%   { opacity: 0.6; r: var(--halo-r0, 22); }
+  80%  { opacity: 0;   r: var(--halo-r1, 38); }
+  100% { opacity: 0;   r: var(--halo-r1, 38); }
+}
+
+.nf-beam-base-rx {
+  fill: none;
+  stroke: #10b981;
+  stroke-opacity: 0.22;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.nf-beam-base-tx {
+  fill: none;
+  stroke: #3b82f6;
+  stroke-opacity: 0.22;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

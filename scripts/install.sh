@@ -43,28 +43,78 @@ msg_ok "Distribuição detectada: ${PRETTY_NAME:-$DISTRO}"
 # 2. Install Python3 and venv dependencies
 msg_info "Garantindo dependências básicas do sistema..."
 case "$DISTRO" in
-    manjaro|arch|endeavouros)
-        pacman -Sy --noconfirm --needed python python-pip
+    manjaro|arch|endeavouros|biglinux)
+        pacman -Sy --noconfirm --needed python python-pip vnstat
         ;;
     ubuntu|debian|linuxmint|pop)
         apt-get update -qq
-        apt-get install -y -qq python3 python3-pip python3-venv curl
+        apt-get install -y -qq python3 python3-pip python3-venv curl vnstat
         ;;
     fedora|rhel|centos|rocky|almalinux)
-        dnf install -y -q python3 python3-pip
+        dnf install -y -q python3 python3-pip vnstat
         ;;
     opensuse*|sles)
-        zypper --non-interactive install python3 python3-pip
+        zypper --non-interactive install python3 python3-pip vnstat
         ;;
     *)
         msg_warn "Distribuição não identificada diretamente. Prosseguindo com verificações genéricas."
         ;;
 esac
 
-# 3. Setup Project Structure
+# Garante coleta contínua de tráfego de rede persistente entre reinícios
+systemctl enable --now vnstat 2>/dev/null || true
+if command -v vnstat >/dev/null 2>&1; then
+    for iface_path in /sys/class/net/*; do
+        iface=$(basename "$iface_path")
+        case "$iface" in
+            lo|docker*|veth*|br-*|tailscale*|virbr*) continue ;;
+            *) vnstat --add -i "$iface" 2>/dev/null || true ;;
+        esac
+    done
+    systemctl restart vnstat 2>/dev/null || true
+fi
+mkdir -p /var/lib/linuxmenux /etc/linuxmenux /var/backups/linuxmenux
+
+# 3. Setup Project Structure & Build Frontend
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ -d "${SCRIPT_DIR}/frontend" ]; then
+    msg_info "Garantindo build atualizado do frontend Vue 3 (Bun)..."
+    BUN_BIN=""
+    if [ -n "${SUDO_USER:-}" ] && [ -x "/home/${SUDO_USER}/.bun/bin/bun" ]; then
+        BUN_BIN="/home/${SUDO_USER}/.bun/bin/bun"
+    elif command -v bun >/dev/null 2>&1; then
+        BUN_BIN="$(command -v bun)"
+    elif [ -x "/root/.bun/bin/bun" ]; then
+        BUN_BIN="/root/.bun/bin/bun"
+    fi
+
+    if [ -z "${BUN_BIN}" ]; then
+        msg_info "Bun v1.4.5 não encontrado. Instalando Bun v1.4.5 automaticamente..."
+        if [ -n "${SUDO_USER:-}" ]; then
+            sudo -u "${SUDO_USER}" bash -c 'curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5"'
+            BUN_BIN="/home/${SUDO_USER}/.bun/bin/bun"
+        else
+            curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5"
+            BUN_BIN="/root/.bun/bin/bun"
+        fi
+    fi
+
+    if [ -x "${BUN_BIN}" ]; then
+        if [ -n "${SUDO_USER:-}" ]; then
+            sudo -u "${SUDO_USER}" bash -c "cd '${SCRIPT_DIR}/frontend' && '${BUN_BIN}' install --frozen-lockfile && '${BUN_BIN}' run build"
+        else
+            (cd "${SCRIPT_DIR}/frontend" && "${BUN_BIN}" install --frozen-lockfile && "${BUN_BIN}" run build)
+        fi
+        msg_ok "Frontend compilado com sucesso via Bun!"
+    else
+        msg_error "Falha ao instalar ou localizar o Bun v1.4.5."
+        exit 1
+    fi
+fi
+
 msg_info "Instalando arquivos em ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cp -r "${SCRIPT_DIR}/backend" "${INSTALL_DIR}/"
 cp -r "${SCRIPT_DIR}/systemd" "${INSTALL_DIR}/"
@@ -83,15 +133,23 @@ msg_info "Instalando dependências do backend no venv..."
 msg_ok "Ambiente Python configurado com sucesso."
 
 # 5. Setup Systemd Service
+msg_info "Garantindo liberação da porta ${PORT}..."
+systemctl stop linuxmenux.service 2>/dev/null || true
+fuser -k "${PORT}/tcp" 2>/dev/null || true
+
 msg_info "Configurando serviço systemd..."
 cp "${INSTALL_DIR}/systemd/linuxmenux.service" "${SERVICE_FILE}"
 systemctl daemon-reload
-systemctl enable --now linuxmenux.service
+systemctl enable linuxmenux.service
+systemctl restart linuxmenux.service
 
 msg_ok "Serviço linuxmenux.service iniciado com sucesso na porta ${PORT}!"
 
 # 6. Inform user
-SERVER_IP=$(hostname -I | awk '{print $1}')
+SERVER_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}' || true)
+if [ -z "${SERVER_IP}" ]; then
+    SERVER_IP=$(hostname -i 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+fi
 echo ""
 echo -e "${GREEN}=====================================================${NC}"
 echo -e "${GREEN}✔ Instalação concluída com sucesso!${NC}"
