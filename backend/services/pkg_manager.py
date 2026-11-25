@@ -7,6 +7,7 @@ across Debian/Ubuntu (APT), Arch/Manjaro (Pacman), RHEL/Rocky/Alma/Fedora (DNF),
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import threading
 import time

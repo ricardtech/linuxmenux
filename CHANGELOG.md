@@ -2,6 +2,19 @@
 
 Todas as mudanças notáveis do **Linux Menux Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.0] - 25/11/2026
+
+### Adicionado
+- **Paridade 1:1 completa em Segurança (`SecurityView.vue`)**: seções `Linux Menux Monitor` e `Sistema Linux` com Autenticação + olho, status 2FA, Certificado SSL auto-assinado (`POST /api/ssl/self-signed`), Tokens de API + Swagger `/docs`, Tailscale, Firewall (`UFW/iptables`) com filtros e remoção de regras, Fail2Ban com whitelist (`ignoreip`) e Auditoria Lynis com barra de progresso.
+- **Paridade 1:1 completa em Configurações (`SettingsView.vue`)**: cabeçalho completo, Token da API do GitHub com botão de olho, Detecção de Atualizações de Containers, Snippets & Comandos Rápidos (`/api/snippets`) e Otimizações & Serviços do Host Linux (`/api/optimizations`).
+- **Auto-atualização no modal Info (`HealthStatusModal.vue`)**: verificação automática de novas releases no repositório público `ricardtech/linuxmenux` e botão **Atualizar para vX.Y.Z** (`POST /api/proxmenux/self-update`).
+
+### Corrigido
+- Adicionado `import shutil` em `backend/services/pkg_manager.py`, corrigindo o erro `HTTP 500 Internal Server Error` em `/api/system`.
+- Corrigida leitura em lote das estatísticas de containers Docker (`_collect_docker_cli_stats`) em `backend/services/docker_swarm.py` para exibir CPU, Memória, E/S de disco e E/S de rede reais.
+- Bloqueio de chamadas e pollers de telemetria em `App.vue` antes da autenticação (`authGate === 'ready'`), eliminando erros `401 Unauthorized` no carregamento inicial.
+- Removido `Depends(require_auth)` inexistente nas novas rotas de `backend/main.py` (autenticação já aplicada globalmente via middleware).
+
 ## [1.2.9] - 25/11/2026
 
 ### Adicionado

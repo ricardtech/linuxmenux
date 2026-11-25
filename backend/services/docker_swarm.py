@@ -197,6 +197,53 @@ def _get_single_container_stats(container_id: str) -> Dict[str, Any]:
     }
 
 
+def _collect_docker_cli_stats() -> Dict[str, Dict[str, Any]]:
+    """Fast single-call stats collection via docker CLI for all running containers."""
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        return {}
+    try:
+        proc = subprocess.run(
+            [docker_bin, "stats", "--no-stream", "--no-trunc", "--format", "{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}"],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return {}
+        out: Dict[str, Dict[str, Any]] = {}
+        for line in proc.stdout.splitlines():
+            parts = line.strip().split("|")
+            if len(parts) < 6:
+                continue
+            sid = parts[0][:12]
+            cpu_str = parts[1].replace("%", "").strip()
+            mem_usage = parts[2].strip()
+            mem_pct_str = parts[3].replace("%", "").strip()
+            net_parts = [p.strip() for p in parts[4].split("/")]
+            blk_parts = [p.strip() for p in parts[5].split("/")]
+            try:
+                cpu_val = round(float(cpu_str), 2)
+            except ValueError:
+                cpu_val = 0.0
+            try:
+                mem_pct_val = round(float(mem_pct_str), 1)
+            except ValueError:
+                mem_pct_val = 0.0
+            out[sid] = {
+                "cpu_percent": cpu_val,
+                "mem_percent": mem_pct_val,
+                "mem_usage": mem_usage or "0 B / 0 B",
+                "net_rx": net_parts[0] if len(net_parts) > 0 else "0 B",
+                "net_tx": net_parts[1] if len(net_parts) > 1 else "0 B",
+                "block_read": blk_parts[0] if len(blk_parts) > 0 else "0 B",
+                "block_write": blk_parts[1] if len(blk_parts) > 1 else "0 B",
+            }
+        return out
+    except Exception:
+        return {}
+
+
 def list_containers(all_containers: bool = True) -> List[Dict[str, Any]]:
     """List all containers on the host with status, Dokploy metadata, live stats, and Traefik domains."""
     path = f"/containers/json?all={'true' if all_containers else 'false'}"
@@ -204,11 +251,19 @@ def list_containers(all_containers: bool = True) -> List[Dict[str, Any]]:
     if not isinstance(raw, list):
         return []
 
+    running_sids = [c.get("Id", "")[:12] for c in raw if c.get("State") == "running" and c.get("Id")]
     stats_map: Dict[str, Dict[str, Any]] = {}
-    for c in raw:
-        if c.get("State") == "running":
-            sid = c.get("Id", "")[:12]
-            stats_map[sid] = _get_single_container_stats(sid)
+    if running_sids:
+        stats_map = _collect_docker_cli_stats()
+        missing_sids = [sid for sid in running_sids if sid not in stats_map]
+        if missing_sids:
+            with ThreadPoolExecutor(max_workers=min(8, len(missing_sids))) as pool:
+                futures = {pool.submit(_get_single_container_stats, sid): sid for sid in missing_sids}
+                for fut, sid in futures.items():
+                    try:
+                        stats_map[sid] = fut.result(timeout=10)
+                    except Exception:
+                        pass
     result = []
     for c in raw:
         names = [n.lstrip("/") for n in c.get("Names", [])]

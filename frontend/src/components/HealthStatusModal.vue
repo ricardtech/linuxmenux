@@ -31,6 +31,41 @@
               <RefreshCw class="w-3.5 h-3.5" /> Verificar agora
             </button>
           </div>
+
+          <!-- Linux Menux Monitor Self-Update Card -->
+          <div class="p-4 rounded-xl border space-y-2.5"
+            :class="appUpdateInfo?.update_available?.stable ? 'bg-blue-500/10 border-blue-500/30' : 'bg-zinc-900/70 border-zinc-800'">
+            <div class="flex items-center justify-between gap-3 flex-wrap">
+              <div>
+                <div class="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Linux Menux Monitor</span>
+                  <span class="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">v{{ appUpdateInfo?.current_version || '1.2.9' }}</span>
+                  <span v-if="appUpdateInfo?.update_available?.stable" class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold">
+                    Nova versão v{{ appUpdateInfo.latest_version }} disponível
+                  </span>
+                  <span v-else class="text-xs px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold">
+                    Aplicação atualizada
+                  </span>
+                </div>
+                <p class="text-xs text-zinc-400 mt-0.5">
+                  {{ appUpdateInfo?.update_available?.stable ? `Publicada em ${appUpdateInfo.published_at || 'GitHub Releases'}` : 'Verificação automática via repositório público GitHub (ricardtech/linuxmenux).' }}
+                </p>
+              </div>
+              <button v-if="appUpdateInfo?.update_available?.stable"
+                @click="$emit('self-update')"
+                :disabled="appUpdating"
+                class="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow shrink-0">
+                <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': appUpdating }" />
+                {{ appUpdating ? 'Atualizando...' : `Atualizar para v${appUpdateInfo.latest_version}` }}
+              </button>
+            </div>
+            <div v-if="appUpdateMsg" class="text-xs text-blue-300 bg-blue-950/50 border border-blue-800/60 rounded-lg px-3 py-2">
+              {{ appUpdateMsg }}
+            </div>
+            <div v-if="appUpdateInfo?.update_available?.stable && appUpdateInfo?.release_notes" class="max-h-28 overflow-y-auto bg-zinc-950/70 border border-zinc-800 rounded-lg p-2.5 text-xs text-zinc-300 whitespace-pre-wrap">
+              {{ appUpdateInfo.release_notes }}
+            </div>
+          </div>
           <div class="grid grid-cols-4 gap-3 text-center">
             <div class="bg-zinc-900/80 border border-zinc-800 rounded-xl p-3">
               <div class="text-lg font-bold text-white">{{ healthData.summary_counts?.total || 0 }}</div>
@@ -128,8 +163,11 @@ const props = defineProps({
   expandedCat: { type: String, default: 'updates' },
   distroId: { type: String, default: '' },
   distroName: { type: String, default: '' },
+  appUpdateInfo: { type: Object, default: () => ({}) },
+  appUpdating: { type: Boolean, default: false },
+  appUpdateMsg: { type: String, default: '' },
 })
-defineEmits(['close', 'open-update', 'refresh-updates', 'update:expandedCat'])
+defineEmits(['close', 'open-update', 'refresh-updates', 'self-update', 'update:expandedCat'])
 
 function categoryIcon(id) {
   switch (id) {

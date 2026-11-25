@@ -1286,21 +1286,37 @@ def get_app_update_status(force: bool = False):
     now = time.time()
     if not force and _APP_UPDATE_CACHE["data"] and (now - _APP_UPDATE_CACHE["ts"]) < 600:
         return _APP_UPDATE_CACHE["data"]
-    current = "1.2.9"
+    current = "1.3.0"
     latest = current
     release_url = "https://github.com/ricardtech/linuxmenux/releases"
+    release_notes = ""
+    published_at = ""
+    tarball_url = ""
     try:
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.0"}
+        gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
+        if gh_token:
+            headers["Authorization"] = f"Bearer {gh_token}"
         req = urllib.request.Request(
             "https://api.github.com/repos/ricardtech/linuxmenux/releases/latest",
-            headers={"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.2.9"},
+            headers=headers,
         )
-        with urllib.request.urlopen(req, timeout=4) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             rel = json.loads(resp.read().decode("utf-8"))
             tag = str(rel.get("tag_name") or "").lstrip("v").strip()
             if tag:
                 latest = tag
             if rel.get("html_url"):
                 release_url = rel["html_url"]
+            release_notes = str(rel.get("body") or "").strip()
+            tarball_url = str(rel.get("tarball_url") or "")
+            raw_pub = str(rel.get("published_at") or "").strip()
+            if raw_pub:
+                try:
+                    dt = datetime.fromisoformat(raw_pub.replace("Z", "+00:00"))
+                    published_at = dt.astimezone().strftime("%d/%m/%Y %H:%M")
+                except Exception:
+                    published_at = raw_pub
     except Exception:
         pass
     has_upd = latest != current
@@ -1309,6 +1325,9 @@ def get_app_update_status(force: bool = False):
         "current_version": current,
         "latest_version": latest,
         "release_url": release_url,
+        "release_notes": release_notes,
+        "published_at": published_at,
+        "tarball_url": tarball_url,
         "update_available": {
             "stable": has_upd,
             "stable_version": latest,
@@ -1319,6 +1338,57 @@ def get_app_update_status(force: bool = False):
     _APP_UPDATE_CACHE["ts"] = now
     _APP_UPDATE_CACHE["data"] = data
     return data
+
+
+@app.post("/api/proxmenux/self-update")
+def trigger_self_update():
+    """Download latest public release from GitHub, run installer/update, and restart service."""
+    import shutil
+    import tarfile
+    import tempfile
+
+    status_info = get_app_update_status(force=True)
+    latest = status_info.get("latest_version") or "1.3.0"
+    tarball_url = status_info.get("tarball_url") or f"https://github.com/ricardtech/linuxmenux/archive/refs/tags/v{latest}.tar.gz"
+
+    tmp_root = tempfile.mkdtemp(prefix="linuxmenux-upd-")
+    tgz_path = os.path.join(tmp_root, "release.tar.gz")
+    try:
+        headers = {"User-Agent": "LinuxMenux/1.3.0"}
+        gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
+        if gh_token:
+            headers["Authorization"] = f"Bearer {gh_token}"
+        req = urllib.request.Request(tarball_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=30) as resp, open(tgz_path, "wb") as fh:
+            shutil.copyfileobj(resp, fh)
+
+        extract_dir = os.path.join(tmp_root, "src")
+        os.makedirs(extract_dir, exist_ok=True)
+        with tarfile.open(tgz_path, "r:gz") as tf:
+            tf.extractall(extract_dir)
+
+        entries = [os.path.join(extract_dir, e) for e in os.listdir(extract_dir)]
+        repo_dir = next((e for e in entries if os.path.isdir(e)), extract_dir)
+        install_script = os.path.join(repo_dir, "scripts", "install.sh")
+        if not os.path.isfile(install_script):
+            raise HTTPException(status_code=500, detail="scripts/install.sh não encontrado na release.")
+
+        subprocess.Popen(
+            ["/bin/bash", "-c", f"sleep 1 && bash '{install_script}' >> /var/log/linuxmenux-update.log 2>&1 && rm -rf '{tmp_root}'"],
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return {
+            "success": True,
+            "target_version": latest,
+            "message": f"Atualização para v{latest} iniciada em segundo plano. O painel reiniciará em instantes.",
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        shutil.rmtree(tmp_root, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Falha ao baixar/aplicar atualização: {exc}")
 
 
 # ─── Docker, Compose & Swarm Endpoints ─────────────────────────────────────
@@ -1621,6 +1691,151 @@ def api_get_settings():
 async def api_save_settings(request: Request):
     body = await request.json()
     return save_settings(body)
+
+
+@app.post("/api/auth/disable")
+def api_auth_disable():
+    from core.auth import set_auth_enabled
+    set_auth_enabled(False)
+    return {"success": True, "enabled": False}
+
+
+@app.post("/api/ssl/self-signed")
+def api_ssl_self_signed():
+    import shutil
+    ssl_dir = "/etc/linuxmenux/ssl"
+    os.makedirs(ssl_dir, exist_ok=True)
+    cert_path = os.path.join(ssl_dir, "cert.pem")
+    key_path = os.path.join(ssl_dir, "key.pem")
+    openssl_bin = shutil.which("openssl")
+    if not openssl_bin:
+        raise HTTPException(status_code=500, detail="openssl não encontrado no sistema.")
+    proc = subprocess.run(
+        [
+            openssl_bin, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", key_path, "-out", cert_path, "-days", "365",
+            "-subj", "/CN=linuxmenux.local/O=RicardTech/C=BR",
+        ],
+        capture_output=True, text=True, timeout=20,
+    )
+    if proc.returncode != 0:
+        raise HTTPException(status_code=500, detail=proc.stderr or "Erro ao gerar certificado SSL.")
+    return {"success": True, "cert_path": cert_path, "key_path": key_path}
+
+
+@app.post("/api/security/firewall/toggle")
+async def api_firewall_toggle(request: Request):
+    import shutil
+    body = await request.json()
+    enable = bool(body.get("enable", True))
+    ufw_bin = shutil.which("ufw")
+    if not ufw_bin:
+        return {"success": False, "error": "UFW não instalado neste host."}
+    cmd = [ufw_bin, "--force", "enable"] if enable else [ufw_bin, "disable"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    return {"success": proc.returncode == 0, "output": proc.stdout + proc.stderr}
+
+
+@app.delete("/api/security/firewall/rule")
+async def api_firewall_delete_rule(request: Request):
+    import shutil
+    body = await request.json()
+    rule_num = str(body.get("number") or "").strip()
+    ufw_bin = shutil.which("ufw")
+    if not ufw_bin or not rule_num.isdigit():
+        return {"success": False, "error": "Regra inválida ou UFW ausente."}
+    proc = subprocess.run([ufw_bin, "--force", "delete", rule_num], capture_output=True, text=True, timeout=15)
+    return {"success": proc.returncode == 0, "output": proc.stdout + proc.stderr}
+
+
+@app.post("/api/security/fail2ban/unban")
+async def api_fail2ban_unban(request: Request):
+    import shutil
+    body = await request.json()
+    jail = str(body.get("jail") or "sshd").strip()
+    ip = str(body.get("ip") or "").strip()
+    f2b = shutil.which("fail2ban-client")
+    if not f2b or not ip:
+        return {"success": False, "error": "fail2ban-client ausente ou IP inválido."}
+    proc = subprocess.run([f2b, "set", jail, "unbanip", ip], capture_output=True, text=True, timeout=15)
+    return {"success": proc.returncode == 0, "output": proc.stdout + proc.stderr}
+
+
+@app.post("/api/security/fail2ban/ignoreip")
+async def api_fail2ban_ignoreip(request: Request):
+    body = await request.json()
+    ip = str(body.get("ip") or "").strip()
+    action = str(body.get("action") or "add")
+    settings = get_settings()
+    trusted = list(settings.get("fail2ban_trusted_ips") or [])
+    if action == "add" and ip and ip not in trusted:
+        trusted.append(ip)
+    elif action == "remove" and ip in trusted:
+        trusted = [x for x in trusted if x != ip]
+    settings["fail2ban_trusted_ips"] = trusted
+    save_settings(settings)
+    return {"success": True, "trusted_ips": trusted}
+
+
+@app.get("/api/snippets")
+def api_get_snippets():
+    settings = get_settings()
+    return {"snippets": settings.get("snippets") or []}
+
+
+@app.post("/api/snippets")
+async def api_save_snippet(request: Request):
+    body = await request.json()
+    settings = get_settings()
+    snippets = list(settings.get("snippets") or [])
+    sid = str(body.get("id") or f"snp_{int(time.time() * 1000)}")
+    entry = {
+        "id": sid,
+        "name": str(body.get("name") or "Snippet").strip(),
+        "command": str(body.get("command") or "").strip(),
+        "description": str(body.get("description") or "").strip(),
+    }
+    snippets = [s for s in snippets if s.get("id") != sid]
+    snippets.append(entry)
+    settings["snippets"] = snippets
+    save_settings(settings)
+    return {"success": True, "snippets": snippets}
+
+
+@app.delete("/api/snippets/{snippet_id}")
+def api_delete_snippet(snippet_id: str):
+    settings = get_settings()
+    snippets = [s for s in (settings.get("snippets") or []) if s.get("id") != snippet_id]
+    settings["snippets"] = snippets
+    save_settings(settings)
+    return {"success": True, "snippets": snippets}
+
+
+@app.get("/api/optimizations")
+def api_get_optimizations():
+    import shutil
+    tools = [
+        ("docker", "Docker Engine", "docker", "Containerização e orquestração de stacks"),
+        ("vnstat", "vnStat Traffic Daemon", "vnstat", "Persistência de tráfego 24h entre reinícios"),
+        ("journald", "Systemd Journal", "journalctl", "Coleta e auditoria de logs do sistema"),
+        ("ufw", "UFW Firewall", "ufw", "Gerenciamento de regras de entrada e saída"),
+        ("fail2ban", "Fail2Ban IPS", "fail2ban-client", "Proteção automática contra força bruta"),
+        ("lynis", "Lynis Security Audit", "lynis", "Auditoria contínua de hardening Linux"),
+        ("tailscale", "Tailscale Mesh VPN", "tailscale", "Gateway seguro ponto-a-ponto"),
+        ("smartctl", "smartmontools (SMART)", "smartctl", "Telemetria de saúde e temperatura NVMe/SSD"),
+    ]
+    res = []
+    for key, name, binary, desc in tools:
+        found = shutil.which(binary)
+        res.append({
+            "key": key,
+            "name": name,
+            "description": desc,
+            "installed": bool(found),
+            "path": found or "",
+            "status": "Ativo" if found else "Não instalado",
+        })
+    return {"tools": res}
 
 
 @app.get("/api/notifications")

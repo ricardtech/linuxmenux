@@ -1,5 +1,11 @@
 <template>
   <div class="space-y-6 animate-fadeIn">
+    <!-- Page Header (1:1 ProxMenux settings.tsx) -->
+    <div>
+      <h1 class="text-3xl font-bold text-white">Configurações</h1>
+      <p class="text-sm text-zinc-400 mt-1">Preferências da interface, limites de saúde, notificações, snippets e otimizações do sistema</p>
+    </div>
+
     <!-- 1. Interface Language Card (1:1 ProxMenux settings.tsx) -->
     <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
       <div class="flex items-start justify-between gap-4">
@@ -394,23 +400,119 @@
       <div class="flex items-start justify-between gap-4">
         <div>
           <h3 class="text-base font-semibold text-white">Token da API do GitHub</h3>
-          <p class="text-xs text-zinc-400 mt-0.5">Evita limite de requisições ao verificar releases e catálogo de apps.</p>
+          <p class="text-xs text-zinc-400 mt-0.5">Opcional para repositórios públicos; evita limite de requisições ao verificar releases e catálogo de apps.</p>
         </div>
         <button @click="saveSection('github')" class="h-8 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1 cursor-pointer">
           <Check class="w-3.5 h-3.5" /> Salvar
         </button>
       </div>
-      <input v-model="settingsData.github_token" type="password" placeholder="ghp_..." class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-xs text-white font-mono" />
+      <div class="relative">
+        <input v-model="settingsData.github_token" :type="showGithubToken ? 'text' : 'password'" placeholder="ghp_..." class="w-full bg-zinc-950 border border-zinc-700 rounded-md pl-3 pr-10 py-2 text-xs text-white font-mono" />
+        <button type="button" @click="showGithubToken = !showGithubToken" class="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
+          <EyeOff v-if="showGithubToken" class="w-4 h-4" /><Eye v-else class="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+
+    <!-- 10. Container Update Detection (1:1 ProxMenux LxcUpdateDetection) -->
+    <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex items-start gap-2.5">
+          <Package class="w-5 h-5 text-cyan-400 mt-0.5 shrink-0" />
+          <div>
+            <h3 class="text-base font-semibold text-white">Detecção de Atualizações de Containers</h3>
+            <p class="text-xs text-zinc-400 mt-0.5">Verifica periodicamente novas versões de imagens Docker e stacks Dokploy no registro remoto.</p>
+          </div>
+        </div>
+        <button @click="saveSection('containers')" class="h-8 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1 cursor-pointer">
+          <Check class="w-3.5 h-3.5" /> Salvar
+        </button>
+      </div>
+      <div class="flex items-center justify-between pt-2 border-t border-zinc-800/70 text-xs">
+        <span class="text-zinc-300">Verificação automática habilitada</span>
+        <input type="checkbox" v-model="settingsData.container_updates_enabled" class="w-4 h-4 accent-blue-600 cursor-pointer" />
+      </div>
+    </div>
+
+    <!-- 11. Snippets & Comandos Rápidos (1:1 ProxMenux settings.tsx) -->
+    <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
+      <div class="flex items-start gap-2.5">
+        <Code class="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />
+        <div>
+          <h3 class="text-base font-semibold text-white">Snippets &amp; Comandos Rápidos</h3>
+          <p class="text-xs text-zinc-400 mt-0.5">Salve comandos Bash frequentes para copiar e executar rapidamente no terminal.</p>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+        <input v-model="newSnippet.name" type="text" placeholder="Nome (ex: Reiniciar Docker)" class="bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white" />
+        <input v-model="newSnippet.command" type="text" placeholder="Comando (ex: systemctl restart docker)" class="bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono sm:col-span-2" />
+      </div>
+      <div class="flex justify-end">
+        <button @click="addSnippet" class="px-3.5 py-1.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer">
+          <Plus class="w-3.5 h-3.5" /> Adicionar Snippet
+        </button>
+      </div>
+      <div v-if="snippets.length" class="space-y-2 text-xs">
+        <div v-for="s in snippets" :key="s.id" class="flex items-center justify-between gap-3 p-3 rounded-lg bg-zinc-950/70 border border-zinc-800">
+          <div class="min-w-0">
+            <div class="font-semibold text-white">{{ s.name }}</div>
+            <div class="font-mono text-zinc-400 truncate mt-0.5">{{ s.command }}</div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <button @click="copySnippet(s.command)" class="p-1.5 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 cursor-pointer" title="Copiar">
+              <Copy class="w-3.5 h-3.5" />
+            </button>
+            <button @click="deleteSnippet(s.id)" class="p-1.5 rounded bg-zinc-900 hover:bg-red-950 border border-zinc-700 text-red-400 cursor-pointer" title="Excluir">
+              <Trash2 class="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
+      <div v-else class="text-xs text-zinc-500 text-center py-3 border border-dashed border-zinc-800 rounded-lg">
+        Nenhum snippet salvo ainda.
+      </div>
+    </div>
+
+    <!-- 12. Otimizações e Ferramentas do Sistema (1:1 ProxMenux settings.tsx) -->
+    <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex items-start gap-2.5">
+          <Sparkles class="w-5 h-5 text-orange-400 mt-0.5 shrink-0" />
+          <div>
+            <h3 class="text-base font-semibold text-white">Otimizações &amp; Serviços do Host Linux</h3>
+            <p class="text-xs text-zinc-400 mt-0.5">Inventário em tempo real dos daemons e utilitários de telemetria e segurança ativos no host.</p>
+          </div>
+        </div>
+        <span class="text-xs font-semibold text-orange-400">{{ optimizations.filter(o => o.installed).length }} / {{ optimizations.length }} ativos</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+        <div v-for="opt in optimizations" :key="opt.key"
+          class="flex items-center justify-between gap-2 p-3 rounded-lg border transition-colors"
+          :class="opt.installed ? 'bg-zinc-950/60 border-zinc-800' : 'bg-zinc-950/30 border-zinc-800/50 opacity-70'">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="w-2 h-2 rounded-full shrink-0" :class="opt.installed ? 'bg-emerald-500' : 'bg-zinc-600'"></span>
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-white truncate">{{ opt.name }}</div>
+              <div class="text-xs text-zinc-400 truncate">{{ opt.description }}</div>
+            </div>
+          </div>
+          <span class="text-xs px-2 py-0.5 rounded font-mono shrink-0"
+            :class="opt.installed ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-900 text-zinc-500 border border-zinc-800'">
+            {{ opt.status }}
+          </span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import {
   Globe2, Ruler, Layers, HardDrive, HeartPulse, Network, Database, Bell,
-  Settings2, Check, RotateCcw, Eye, EyeOff, Send
+  Settings2, Check, RotateCcw, Eye, EyeOff, Send, Code, Sparkles, Copy, Trash2, Plus, Package
 } from 'lucide-vue-next'
+import { fetchApi } from '../lib/api-config'
 
 const props = defineProps({
   settingsData: { type: Object, required: true },
@@ -434,6 +536,53 @@ const notifTab = ref('channels')
 const showTgToken = ref(false)
 const showDiscordUrl = ref(false)
 const showAiKey = ref(false)
+const showGithubToken = ref(false)
+const snippets = ref([])
+const newSnippet = ref({ name: '', command: '' })
+const optimizations = ref([])
+
+onMounted(async () => {
+  try {
+    const [snRes, optRes] = await Promise.all([
+      fetch('/api/snippets'),
+      fetch('/api/optimizations'),
+    ])
+    if (snRes.ok) {
+      const d = await snRes.json()
+      snippets.value = d.snippets || []
+    }
+    if (optRes.ok) {
+      const d = await optRes.json()
+      optimizations.value = d.tools || []
+    }
+  } catch {}
+})
+
+async function addSnippet() {
+  if (!newSnippet.value.name.trim() || !newSnippet.value.command.trim()) return
+  const res = await fetchApi('/api/snippets', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newSnippet.value),
+  })
+  if (res.ok) {
+    const d = await res.json()
+    snippets.value = d.snippets || []
+    newSnippet.value = { name: '', command: '' }
+  }
+}
+
+async function deleteSnippet(id) {
+  const res = await fetchApi(`/api/snippets/${id}`, { method: 'DELETE' })
+  if (res.ok) {
+    const d = await res.json()
+    snippets.value = d.snippets || []
+  }
+}
+
+function copySnippet(cmd) {
+  navigator.clipboard?.writeText(cmd)
+}
 
 const DEFAULT_TABS = ['overview', 'apps', 'containers', 'node', 'backup', 'terminal', 'admin']
 const tabOrder = ref([...DEFAULT_TABS])

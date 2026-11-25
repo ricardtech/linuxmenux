@@ -56,9 +56,10 @@
 
           <!-- Info Badge -->
           <button @click="openHealthModal('updates')"
-            class="bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 text-xs px-2.5 py-1 rounded-full font-medium flex items-center gap-1 transition cursor-pointer">
+            class="text-xs px-2.5 py-1 rounded-full font-medium flex items-center gap-1 transition cursor-pointer"
+            :class="appUpdateInfo.update_available?.stable ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 animate-pulse' : 'bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20'">
             <Info class="w-3 h-3" />
-            <span>{{ (systemData.available_updates || 0) > 0 ? `${systemData.available_updates} atualizações` : '1 info' }}</span>
+            <span>{{ appUpdateInfo.update_available?.stable ? `Nova versão v${appUpdateInfo.latest_version}` : ((systemData.available_updates || 0) > 0 ? `${systemData.available_updates} atualizações` : '1 info') }}</span>
           </button>
 
           <!-- Uptime -->
@@ -433,10 +434,14 @@
         :health-data="healthData"
         :distro-id="systemData.distro_id"
         :distro-name="systemData.distro_name"
+        :app-update-info="appUpdateInfo"
+        :app-updating="appUpdating"
+        :app-update-msg="appUpdateMsg"
         v-model:expanded-cat="expandedHealthCat"
         @close="healthModalOpen = false"
         @open-update="openSystemUpdateModal()"
         @refresh-updates="openHealthModal('updates', true)"
+        @self-update="triggerAppSelfUpdate()"
       />
       <SystemUpdateModal
         ref="updateModalRef"
@@ -592,16 +597,14 @@ async function onAuthCompleted(payload) {
   currentUsername.value = payload?.username || 'admin'
   authGate.value = 'ready'
   checkFirstVisitModals()
-  await fetchTelemetry()
-  await fetchFlowData()
+  await startDashboardSession()
 }
 
 async function onAuthAuthenticated(payload) {
   currentUsername.value = payload?.username || 'admin'
   authGate.value = 'ready'
   checkFirstVisitModals()
-  await fetchTelemetry()
-  await fetchFlowData()
+  await startDashboardSession()
 }
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Title, Tooltip, Legend, Filler)
@@ -938,12 +941,56 @@ async function saveAdminSettings() {
   alert('Configurações salvas com sucesso!')
 }
 
+const appUpdateInfo = ref({ current_version: APP_VERSION, latest_version: APP_VERSION, update_available: { stable: false } })
+const appUpdating = ref(false)
+const appUpdateMsg = ref('')
+
+async function fetchAppUpdateStatus(force = false) {
+  try {
+    const res = await fetch(`/api/proxmenux/update-status?force=${force ? 'true' : 'false'}`)
+    if (res.ok) {
+      appUpdateInfo.value = await res.json()
+    }
+  } catch {}
+}
+
+async function triggerAppSelfUpdate() {
+  if (appUpdating.value) return
+  appUpdating.value = true
+  appUpdateMsg.value = 'Baixando e aplicando nova versão do repositório...'
+  try {
+    const res = await fetch('/api/proxmenux/self-update', { method: 'POST' })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      appUpdateMsg.value = data.detail || 'Falha ao iniciar atualização.'
+      appUpdating.value = false
+      return
+    }
+    appUpdateMsg.value = data.message || 'Atualização iniciada. Aguardando reinício do serviço...'
+    const poll = setInterval(async () => {
+      try {
+        const ping = await fetch('/api/auth/status')
+        if (ping.ok) {
+          clearInterval(poll)
+          window.location.reload()
+        }
+      } catch {}
+    }, 3000)
+  } catch (e) {
+    appUpdateMsg.value = 'Erro de conexão ao atualizar.'
+    appUpdating.value = false
+  }
+}
+
 async function openHealthModal(defaultCat = 'updates', forceUpdates = false) {
   healthModalOpen.value = true
   expandedHealthCat.value = defaultCat
   healthLoading.value = true
   try {
-    const res = await fetch(`/api/health/full?force_updates=${forceUpdates ? 'true' : 'false'}`)
+    const [res] = await Promise.all([
+      fetch(`/api/health/full?force_updates=${forceUpdates ? 'true' : 'false'}`),
+      fetchAppUpdateStatus(forceUpdates),
+    ])
     if (res.ok) {
       healthData.value = await res.json()
     }
@@ -1044,6 +1091,7 @@ const flowConsumers = computed(() => {
 })
 
 async function fetchFlowData() {
+  if (authGate.value !== 'ready') return
   try {
     const res = await fetch('/api/network/flow')
     if (res.ok) {
@@ -1504,6 +1552,7 @@ async function removeCustomLink(id) {
 
 // Fetch Telemetry from Backend
 async function fetchTelemetry() {
+  if (authGate.value !== 'ready') return
   try {
     const [sysRes, netRes, vmRes] = await Promise.all([
       fetch('/api/system').then(r => r.ok ? r.json() : null),
@@ -2024,8 +2073,25 @@ onMounted(async () => {
     authGate.value = 'login'
   })
 
+  window.addEventListener('resize', handleResize)
+  window.addEventListener('keydown', handleGlobalEscape)
+
+  if (authGate.value === 'ready') {
+    await startDashboardSession()
+  }
+})
+
+let dashboardSessionStarted = false
+async function startDashboardSession() {
+  if (dashboardSessionStarted) {
+    await fetchTelemetry()
+    await fetchFlowData()
+    return
+  }
+  dashboardSessionStarted = true
   await fetchTelemetry()
   await fetchFlowData()
+  fetchAppUpdateStatus()
   await fetchCustomLinks()
   await fetchAppOverrides()
   fetchStorageDisks()
@@ -2036,15 +2102,14 @@ onMounted(async () => {
   if (activeTab.value === 'terminal') {
     initTerminal()
   }
-  window.addEventListener('resize', handleResize)
-  window.addEventListener('keydown', handleGlobalEscape)
   setInterval(fetchTelemetry, 3000)
   setInterval(fetchFlowData, 2000)
   setInterval(() => {
+    if (authGate.value !== 'ready') return
     updateMetricsCharts()
     updateOverviewNetChart()
   }, 15000)
-})
+}
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
