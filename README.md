@@ -1,10 +1,16 @@
-# Linux Menux Monitor `v1.3.0` 🐧⚡
+<div align="left">
+  <img src="./frontend/public/logo.svg" alt="Linux Menux - Monitor" width="56" height="56" />
+</div>
 
-[![Versão](https://img.shields.io/badge/versão-1.3.0-orange.svg)](./CHANGELOG.md)
+# Linux Menux - Monitor `v1.3.1`
+
+[![Versão](https://img.shields.io/badge/versão-1.3.1-orange.svg)](./CHANGELOG.md)
 [![Forgejo](https://img.shields.io/badge/Forgejo-Self--Hosted-ea580c?logo=forgejo)](https://git.ricardtech.top/RicardTech/linuxmenux)
 [![GitLab](https://img.shields.io/badge/GitLab-Triplo--Push-fc6d26?logo=gitlab)](https://gitlab.com/ricard-tech/linuxmenux)
 [![Métricas](https://img.shields.io/badge/RicardTech-Metrics-0ea5e9)](https://git.ricardtech.top/RicardTech/ricardtech-metrics)
 [![Licença](https://img.shields.io/badge/licença-GPLv2-blue.svg)](./LICENSE)
+
+📊 **Métricas do Ecossistema Ricard Tech**: [https://git.ricardtech.top/RicardTech/ricardtech-metrics](https://git.ricardtech.top/RicardTech/ricardtech-metrics)
 
 > Dashboard Web e Terminal Interativo para servidores Linux com suporte nativo a **Docker Swarm, Compose, Dokploy, Traefik, Firewall, Cloudflare R2 e Multi-Distro (BigLinux, Manjaro, Arch, Ubuntu, Debian, RHEL, Rocky, Alma, openSUSE, Fedora)**.
 

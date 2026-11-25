@@ -32,13 +32,13 @@
             </button>
           </div>
 
-          <!-- Linux Menux Monitor Self-Update Card -->
+          <!-- Linux Menux - Monitor Self-Update Card -->
           <div class="p-4 rounded-xl border space-y-2.5"
             :class="appUpdateInfo?.update_available?.stable ? 'bg-blue-500/10 border-blue-500/30' : 'bg-zinc-900/70 border-zinc-800'">
             <div class="flex items-center justify-between gap-3 flex-wrap">
               <div>
                 <div class="text-sm font-bold text-white flex items-center gap-2">
-                  <span>Linux Menux Monitor</span>
+                  <span>Linux Menux - Monitor</span>
                   <span class="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">v{{ appUpdateInfo?.current_version || '1.2.9' }}</span>
                   <span v-if="appUpdateInfo?.update_available?.stable" class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold">
                     Nova versão v{{ appUpdateInfo.latest_version }} disponível

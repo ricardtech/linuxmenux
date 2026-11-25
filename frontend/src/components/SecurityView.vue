@@ -6,9 +6,9 @@
       <p class="text-sm text-zinc-400 mt-1">Autenticação, certificados SSL, tokens de API, firewall, Fail2Ban e auditoria Lynis</p>
     </div>
 
-    <!-- Section 1: Linux Menux Monitor -->
+    <!-- Section 1: Linux Menux - Monitor -->
     <div class="space-y-4">
-      <h2 class="text-sm font-semibold uppercase tracking-wider text-cyan-400">Linux Menux Monitor</h2>
+      <h2 class="text-sm font-semibold uppercase tracking-wider text-cyan-400">Linux Menux - Monitor</h2>
 
       <!-- 1. Autenticação & Credenciais + 2FA -->
       <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">

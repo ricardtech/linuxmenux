@@ -2,9 +2,9 @@
   <div class="min-h-screen bg-[#18181b] flex items-center justify-center p-4">
     <div class="w-full max-w-lg bg-[#202024] border border-zinc-800 rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
       <div class="flex items-center gap-3.5">
-        <img src="/logo.svg" alt="Linux Menux Monitor" class="w-11 h-11 rounded-xl shadow-lg shadow-orange-500/25 shrink-0" />
+        <img src="/logo.svg" alt="Linux Menux - Monitor" class="w-11 h-11 rounded-xl shadow-lg shadow-orange-500/25 shrink-0" />
         <div>
-          <h1 class="text-xl font-bold text-white">Bem-vindo ao Linux Menux Monitor</h1>
+          <h1 class="text-xl font-bold text-white">Bem-vindo ao Linux Menux - Monitor</h1>
           <p class="text-xs text-zinc-400">Configuração inicial de segurança e credenciais do administrador</p>
         </div>
       </div>

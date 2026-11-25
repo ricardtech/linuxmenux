@@ -1,6 +1,12 @@
 # Changelog
 
-Todas as mudanças notáveis do **Linux Menux Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
+Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
+
+## [1.3.1] - 25/11/2026
+
+### Alterado
+- Padronizado o nome oficial **`Linux Menux - Monitor`** (com hífen) em toda a interface, cabeçalho, login, setup, sobre, segurança, título HTML, FastAPI e serviço systemd.
+- Substituído o emoji no topo do `README.md` pelo logotipo SVG oficial (`frontend/public/logo.svg`) e destacado o link direto de métricas (`https://git.ricardtech.top/RicardTech/ricardtech-metrics`).
 
 ## [1.3.0] - 25/11/2026
 

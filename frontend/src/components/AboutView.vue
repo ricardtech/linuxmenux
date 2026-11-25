@@ -3,10 +3,10 @@
     <!-- Hero Card (1:1 ProxMenux about.tsx) -->
     <div class="bg-[#18181b] border border-zinc-800 rounded-xl p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div class="flex items-center gap-4">
-        <img src="/logo.svg" alt="Linux Menux Monitor" class="w-12 h-12 rounded-xl shadow-lg shadow-orange-500/20 shrink-0" />
+        <img src="/logo.svg" alt="Linux Menux - Monitor" class="w-12 h-12 rounded-xl shadow-lg shadow-orange-500/20 shrink-0" />
         <div>
           <div class="flex items-center gap-2">
-            <h2 class="text-lg font-bold text-white">Linux Menux Monitor</h2>
+            <h2 class="text-lg font-bold text-white">Linux Menux - Monitor</h2>
             <span class="text-xs px-2 py-0.5 rounded bg-orange-500/15 text-orange-400 border border-orange-500/30 font-semibold">v{{ version }}</span>
           </div>
           <p class="text-xs text-zinc-400 mt-0.5">

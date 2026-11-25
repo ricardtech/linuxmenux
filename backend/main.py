@@ -107,7 +107,7 @@ from core.auth import (
 )
 from api.terminal import issue_ticket, consume_ticket, handle_terminal_session
 
-app = FastAPI(title="Linux Menux Monitor", version="1.2.9")
+app = FastAPI(title="Linux Menux - Monitor", version="1.3.1")
 
 
 @app.middleware("http")
@@ -1286,14 +1286,14 @@ def get_app_update_status(force: bool = False):
     now = time.time()
     if not force and _APP_UPDATE_CACHE["data"] and (now - _APP_UPDATE_CACHE["ts"]) < 600:
         return _APP_UPDATE_CACHE["data"]
-    current = "1.3.0"
+    current = "1.3.1"
     latest = current
     release_url = "https://github.com/ricardtech/linuxmenux/releases"
     release_notes = ""
     published_at = ""
     tarball_url = ""
     try:
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.0"}
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.1"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"
@@ -1348,13 +1348,13 @@ def trigger_self_update():
     import tempfile
 
     status_info = get_app_update_status(force=True)
-    latest = status_info.get("latest_version") or "1.3.0"
+    latest = status_info.get("latest_version") or "1.3.1"
     tarball_url = status_info.get("tarball_url") or f"https://github.com/ricardtech/linuxmenux/archive/refs/tags/v{latest}.tar.gz"
 
     tmp_root = tempfile.mkdtemp(prefix="linuxmenux-upd-")
     tgz_path = os.path.join(tmp_root, "release.tar.gz")
     try:
-        headers = {"User-Agent": "LinuxMenux/1.3.0"}
+        headers = {"User-Agent": "LinuxMenux/1.3.1"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"

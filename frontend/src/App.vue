@@ -9,10 +9,10 @@
       <div class="container mx-auto flex items-center justify-between gap-4">
         <!-- Logo & Branding (Linux Menux official SVG logo) -->
         <div class="flex items-center gap-3">
-          <img src="/logo.svg" alt="Linux Menux Monitor" class="w-9 h-9 rounded-lg shadow-lg shadow-orange-500/20 shrink-0" />
+          <img src="/logo.svg" alt="Linux Menux - Monitor" class="w-9 h-9 rounded-lg shadow-lg shadow-orange-500/20 shrink-0" />
           <div>
             <div class="flex items-center gap-2">
-              <h1 class="text-base font-bold text-white tracking-tight">Linux Menux Monitor</h1>
+              <h1 class="text-base font-bold text-white tracking-tight">Linux Menux - Monitor</h1>
               <span class="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded tabular-nums font-semibold">v1.2.9</span>
             </div>
             <p class="text-xs text-zinc-400 font-medium">Painel do sistema {{ systemData.distro_name || 'Linux' }}</p>

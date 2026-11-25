@@ -3,9 +3,9 @@
     <div class="p-6 space-y-6">
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <img src="/logo.svg" alt="Linux Menux Monitor" class="w-10 h-10 rounded-xl shadow-lg shrink-0" />
+          <img src="/logo.svg" alt="Linux Menux - Monitor" class="w-10 h-10 rounded-xl shadow-lg shrink-0" />
           <div>
-            <h3 class="text-base font-bold text-white">Bem-vindo ao Linux Menux Monitor</h3>
+            <h3 class="text-base font-bold text-white">Bem-vindo ao Linux Menux - Monitor</h3>
             <p class="text-xs text-zinc-400">Passo {{ step + 1 }} de {{ slides.length }}</p>
           </div>
         </div>
