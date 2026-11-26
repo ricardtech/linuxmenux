@@ -75,19 +75,28 @@ def check_updates(force_sync: bool = False) -> Dict[str, Any]:
                 fb_proc = subprocess.run(["pacman", "-Qu"], capture_output=True, text=True, timeout=15)
                 parsed_lines = [l.strip() for l in fb_proc.stdout.splitlines() if l.strip()]
 
-            result["pending_count"] = len(parsed_lines)
-            for line in parsed_lines[:60]:
+            vercmp_bin = shutil.which("vercmp")
+            filtered_pkgs: List[Dict[str, str]] = []
+            for line in parsed_lines[:80]:
                 parts = line.split()
                 if len(parts) >= 4:
-                    result["packages"].append({
-                        "name": parts[0],
-                        "old_version": parts[1],
-                        "new_version": parts[3],
-                    })
+                    old_v = parts[1]
+                    new_v = parts[3]
+                    if vercmp_bin and old_v and new_v:
+                        try:
+                            vp = subprocess.run([vercmp_bin, new_v, old_v], capture_output=True, text=True, timeout=2)
+                            if vp.returncode == 0 and int(vp.stdout.strip()) <= 0:
+                                continue  # Ignora downgrades / falso-positivos de mirrors
+                        except Exception:
+                            pass
+                    filtered_pkgs.append({"name": parts[0], "old_version": old_v, "new_version": new_v})
                 elif len(parts) >= 2:
-                    result["packages"].append({"name": parts[0], "old_version": "", "new_version": parts[-1]})
+                    filtered_pkgs.append({"name": parts[0], "old_version": "", "new_version": parts[-1]})
                 else:
-                    result["packages"].append({"name": line, "old_version": "", "new_version": ""})
+                    filtered_pkgs.append({"name": line, "old_version": "", "new_version": ""})
+
+            result["packages"] = filtered_pkgs
+            result["pending_count"] = len(filtered_pkgs)
 
         elif mgr == "apt":
             if force_sync:

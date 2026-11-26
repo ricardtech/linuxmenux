@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.10] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **25.681 linhas** de código em **93 arquivos-fonte** (`8.492` `.vue` · `6.644` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
+### Corrigido
+- **Detecção real de atualizações (`pkg_manager.py`)**: adicionado filtro com `vercmp <nova_versao> <versao_atual>` para descartar falsos positivos de downgrade retornados pelo `pamac checkupdates` (ex: `26.11.25_1-2026 -> 26.11.25_1-2021`), mantendo apenas atualizações reais.
+
 ## [1.3.9] - 26/11/2026
 
 ### Corrigido
