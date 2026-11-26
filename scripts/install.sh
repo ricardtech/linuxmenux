@@ -119,6 +119,8 @@ msg_info "Instalando arquivos em ${INSTALL_DIR}..."
 mkdir -p "${INSTALL_DIR}"
 
 cp -r "${SCRIPT_DIR}/backend" "${INSTALL_DIR}/"
+mkdir -p "${INSTALL_DIR}/frontend/src/lib"
+cp "${SCRIPT_DIR}/frontend/src/lib/version.js" "${INSTALL_DIR}/frontend/src/lib/"
 cp -r "${SCRIPT_DIR}/systemd" "${INSTALL_DIR}/"
 cp "${SCRIPT_DIR}/scripts/uninstall.sh" "${INSTALL_DIR}/"
 chmod +x "${INSTALL_DIR}/uninstall.sh"

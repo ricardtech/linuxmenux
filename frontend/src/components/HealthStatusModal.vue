@@ -39,7 +39,7 @@
               <div>
                 <div class="text-sm font-bold text-white flex items-center gap-2">
                   <span>Linux Menux - Monitor</span>
-                  <span class="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">v{{ appUpdateInfo?.current_version || '1.2.9' }}</span>
+                  <span class="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 font-mono">v{{ appUpdateInfo?.current_version || APP_VERSION }}</span>
                   <span v-if="appUpdateInfo?.update_available?.stable" class="text-xs px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30 font-semibold">
                     Nova versão v{{ appUpdateInfo.latest_version }} disponível
                   </span>
@@ -155,6 +155,7 @@ import {
 } from 'lucide-vue-next'
 import BaseModal from './BaseModal.vue'
 import DistroLogo from './DistroLogo.vue'
+import { APP_VERSION } from '../lib/version'
 
 const props = defineProps({
   open: { type: Boolean, default: false },

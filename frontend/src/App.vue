@@ -13,7 +13,7 @@
           <div>
             <div class="flex items-center gap-2">
               <h1 class="text-base font-bold text-white tracking-tight">Linux Menux - Monitor</h1>
-              <span class="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded tabular-nums font-semibold">v1.2.9</span>
+              <span class="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded tabular-nums font-semibold">v{{ APP_VERSION }}</span>
             </div>
             <p class="text-xs text-zinc-400 font-medium">Painel do sistema {{ systemData.distro_name || 'Linux' }}</p>
           </div>
@@ -514,7 +514,7 @@
 
     <!-- Footer -->
     <footer class="bg-[#18181b] border-t border-zinc-800/80 px-6 py-4 text-center text-xs text-zinc-400 tabular-nums">
-      Linux Menux v1.2.9 · Painel de Controle Linux, Docker Swarm & Dokploy · Multi-Distro
+      Linux Menux - Monitor v{{ APP_VERSION }} · Painel de Controle Linux, Docker Swarm & Dokploy · Multi-Distro
     </footer>
   </div>
 </template>

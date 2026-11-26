@@ -2,6 +2,11 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.6] - 25/11/2026
+
+### Corrigido
+- **Versão dinâmica 100% via `version.js`**: removidas as últimas referências fixas `v1.2.9` no cabeçalho/rodapé de `App.vue`, `HealthStatusModal.vue` e `backend/main.py`, passando a usar `APP_VERSION` de `frontend/src/lib/version.js` em todos os lugares (inclusive copiado para `/usr/local/share/linuxmenux/frontend/src/lib/version.js` pelo `install.sh`).
+
 ## [1.3.5] - 25/11/2026
 
 ### Segurança & Infraestrutura
