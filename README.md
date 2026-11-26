@@ -12,6 +12,8 @@
 
 📊 **Métricas do Ecossistema Ricard Tech**: [https://git.ricardtech.top/RicardTech/ricardtech-metrics](https://git.ricardtech.top/RicardTech/ricardtech-metrics)
 
+[![Métricas do Linux Menux - Monitor](https://git.ricardtech.top/RicardTech/ricardtech-metrics/raw/branch/main/charts/linuxmenux.svg)](https://git.ricardtech.top/RicardTech/ricardtech-metrics)
+
 > Dashboard Web e Terminal Interativo para servidores Linux com suporte nativo a **Docker Swarm, Compose, Dokploy, Traefik, Firewall, Cloudflare R2 e Multi-Distro (BigLinux, Manjaro, Arch, Ubuntu, Debian, RHEL, Rocky, Alma, openSUSE, Fedora)**.
 
 Inspirado na usabilidade do [ProxMenux](https://github.com/MacRimi/ProxMenux), porém projetado do zero para servidores de aplicação e clusters Docker sem acoplamento a Proxmox VE.
