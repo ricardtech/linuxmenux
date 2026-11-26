@@ -814,14 +814,77 @@ def get_security_overview() -> Dict[str, Any]:
     }
 
 
+def _configure_fail2ban_defaults() -> Dict[str, Any]:
+    """Cria filtro do Linux Menux e jail.local com sshd + linuxmenux e whitelist."""
+    try:
+        os.makedirs("/etc/fail2ban/filter.d", exist_ok=True)
+        auth_log = "/var/log/linuxmenux-auth.log"
+        if not os.path.exists(auth_log):
+            with open(auth_log, "a", encoding="utf-8"):
+                pass
+
+        filter_conf = (
+            "[Definition]\n"
+            "failregex = ^.*linuxmenux-auth: Failed login from <HOST>.*$\n"
+            "ignoreregex =\n"
+        )
+        with open("/etc/fail2ban/filter.d/linuxmenux.conf", "w", encoding="utf-8") as fh:
+            fh.write(filter_conf)
+
+        settings = get_settings()
+        trusted = list(settings.get("fail2ban_trusted_ips") or [])
+        base_ignore = ["127.0.0.1/8", "::1"]
+        for ip in trusted:
+            if ip and ip not in base_ignore:
+                base_ignore.append(ip)
+
+        jail_local = (
+            "[DEFAULT]\n"
+            f"ignoreip = {' '.join(base_ignore)}\n"
+            "bantime = 1h\n"
+            "findtime = 10m\n"
+            "maxretry = 3\n\n"
+            "[sshd]\n"
+            "enabled = true\n"
+            "port = ssh\n"
+            "backend = systemd\n"
+            "maxretry = 3\n"
+            "findtime = 10m\n"
+            "bantime = 1h\n\n"
+            "[linuxmenux]\n"
+            "enabled = true\n"
+            "port = 8008,80,443\n"
+            "filter = linuxmenux\n"
+            f"logpath = {auth_log}\n"
+            "maxretry = 3\n"
+            "findtime = 10m\n"
+            "bantime = 1h\n"
+        )
+        with open("/etc/fail2ban/jail.local", "w", encoding="utf-8") as fh:
+            fh.write(jail_local)
+
+        _run_cmd(["systemctl", "enable", "--now", "fail2ban"], timeout=15)
+        _run_cmd(["systemctl", "restart", "fail2ban"], timeout=15)
+        return {"configured": True}
+    except Exception as exc:
+        return {"configured": False, "error": str(exc)}
+
+
 def install_security_tool(tool: str) -> Dict[str, Any]:
     if tool == "fail2ban":
-        return _install_packages_multi_distro({
+        res = _install_packages_multi_distro({
             "apt": ["fail2ban"],
             "pacman": ["fail2ban"],
             "dnf": ["fail2ban"],
             "zypper": ["fail2ban"],
         })
+        if res.get("success"):
+            cfg_res = _configure_fail2ban_defaults()
+            if cfg_res.get("configured"):
+                res["message"] = (res.get("message") or "") + " Jails sshd e linuxmenux configurados com sucesso."
+            elif cfg_res.get("error"):
+                res["message"] = (res.get("message") or "") + f" (Aviso na configuração: {cfg_res['error']})"
+        return res
     if tool == "lynis":
         return _install_packages_multi_distro({
             "apt": ["lynis"],

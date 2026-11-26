@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.1] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.085 linhas** de código em **94 arquivos-fonte** (`9.279` `.vue` · `7.261` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
+### Adicionado
+- **Auto-configuração completa do Fail2Ban (`linux_ops.py` & `main.py`)**: ao instalar o Fail2Ban pelo painel, cria automaticamente `/etc/fail2ban/filter.d/linuxmenux.conf` e `/etc/fail2ban/jail.local` com os jails `sshd` (`backend = systemd`, `maxretry = 3`, `findtime = 10m`, `bantime = 1h`) e `linuxmenux` (portas `8008,80,443`, monitorando `/var/log/linuxmenux-auth.log` com IP real via `CF-Connecting-IP`/`X-Forwarded-For`), preservando os IPs da whitelist (`ignoreip`) cadastrados nas configurações.
+
 ## [1.4.0] - 26/11/2026
 
 ### 📊 Métricas de Código

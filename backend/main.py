@@ -311,6 +311,18 @@ async def auth_login(request: Request):
         token = generate_jwt(username)
         return {"success": True, "token": token, "username": username}
 
+    try:
+        client_ip = (
+            request.headers.get("cf-connecting-ip")
+            or (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+            or (request.client.host if request.client else "unknown")
+        )
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open("/var/log/linuxmenux-auth.log", "a", encoding="utf-8") as fh:
+            fh.write(f"{ts} linuxmenux-auth: Failed login from {client_ip}\n")
+    except Exception:
+        pass
+
     raise HTTPException(status_code=401, detail="Nome de usuário ou senha incorretos")
 
 
