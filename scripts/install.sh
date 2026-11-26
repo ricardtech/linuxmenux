@@ -81,22 +81,41 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -d "${SCRIPT_DIR}/frontend" ] && [ "${LINUXMENUX_SKIP_BUILD:-0}" != "1" ]; then
     msg_info "Garantindo build atualizado do frontend Vue 3 (Bun)..."
     BUN_BIN=""
-    if [ -n "${SUDO_USER:-}" ] && [ -x "/home/${SUDO_USER}/.bun/bin/bun" ]; then
-        BUN_BIN="/home/${SUDO_USER}/.bun/bin/bun"
-    elif command -v bun >/dev/null 2>&1; then
-        BUN_BIN="$(command -v bun)"
-    elif [ -x "/root/.bun/bin/bun" ]; then
-        BUN_BIN="/root/.bun/bin/bun"
-    fi
 
+    # 1. Procura Bun funcional já instalado (incluindo /home/*/.bun/bin/bun quando rodando via systemd/root)
+    for cand in "$(command -v bun 2>/dev/null || true)" "/root/.bun/bin/bun" /home/*/.bun/bin/bun; do
+        if [ -n "${cand}" ] && [ -x "${cand}" ] && "${cand}" --version >/dev/null 2>&1; then
+            BUN_BIN="${cand}"
+            break
+        fi
+    done
+
+    # 2. Se não encontrou Bun funcional, instala (com fallback automático para baseline se CPU não suportar AVX2)
     if [ -z "${BUN_BIN}" ] && [ ! -f "${SCRIPT_DIR}/backend/static/index.html" ]; then
-        msg_info "Bun v1.4.5 não encontrado. Instalando Bun v1.4.5 automaticamente..."
-        if [ -n "${SUDO_USER:-}" ]; then
+        msg_info "Bun funcional não encontrado. Instalando Bun v1.4.5..."
+        if [ -n "${SUDO_USER:-}" ] && id "${SUDO_USER}" >/dev/null 2>&1; then
             sudo -u "${SUDO_USER}" bash -c 'curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5"' || true
-            BUN_BIN="/home/${SUDO_USER}/.bun/bin/bun"
+            [ -x "/home/${SUDO_USER}/.bun/bin/bun" ] && BUN_BIN="/home/${SUDO_USER}/.bun/bin/bun"
         else
             curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5" || true
-            BUN_BIN="/root/.bun/bin/bun"
+            [ -x "/root/.bun/bin/bun" ] && BUN_BIN="/root/.bun/bin/bun"
+        fi
+
+        if [ -n "${BUN_BIN}" ] && ! "${BUN_BIN}" --version >/dev/null 2>&1; then
+            msg_warn "Bun padrão incompatível com a CPU (sem AVX2). Baixando variante baseline..."
+            ARCH="$(uname -m)"
+            if [ "${ARCH}" = "x86_64" ] && command -v unzip >/dev/null 2>&1; then
+                TMP_BUN="$(mktemp -d)"
+                if curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v1.4.5/bun-linux-x64-baseline.zip" -o "${TMP_BUN}/bun.zip"; then
+                    unzip -qo "${TMP_BUN}/bun.zip" -d "${TMP_BUN}"
+                    if [ -f "${TMP_BUN}/bun-linux-x64-baseline/bun" ]; then
+                        mkdir -p "$(dirname "${BUN_BIN}")"
+                        cp "${TMP_BUN}/bun-linux-x64-baseline/bun" "${BUN_BIN}"
+                        chmod +x "${BUN_BIN}"
+                    fi
+                fi
+                rm -rf "${TMP_BUN}"
+            fi
         fi
     fi
 
@@ -107,10 +126,14 @@ if [ -d "${SCRIPT_DIR}/frontend" ] && [ "${LINUXMENUX_SKIP_BUILD:-0}" != "1" ]; 
             (cd "${SCRIPT_DIR}/frontend" && "${BUN_BIN}" install --frozen-lockfile && "${BUN_BIN}" run build)
         fi
         msg_ok "Frontend compilado com sucesso via Bun!"
+    elif command -v npm >/dev/null 2>&1; then
+        msg_warn "Bun indisponível; compilando frontend via npm..."
+        (cd "${SCRIPT_DIR}/frontend" && npm install --no-audit --no-fund && npm run build)
+        msg_ok "Frontend compilado com sucesso via npm!"
     elif [ -f "${SCRIPT_DIR}/backend/static/index.html" ]; then
-        msg_warn "Bun indisponível ou incompatível neste usuário; utilizando build pré-compilado de backend/static/."
+        msg_warn "Bun/npm indisponíveis; utilizando build pré-compilado de backend/static/."
     else
-        msg_error "Falha ao instalar ou localizar o Bun v1.4.5."
+        msg_error "Falha ao instalar ou localizar o Bun v1.4.5 (e npm ausente)."
         exit 1
     fi
 fi

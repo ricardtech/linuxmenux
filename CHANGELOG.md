@@ -2,6 +2,15 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.5] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.147 linhas** de código em **94 arquivos-fonte** (`9.282` `.vue` · `7.297` `.py` · `7.610` `.css` · `2.668` `.js` · `272` `.sh` · `18` `.service`).
+
+### Corrigido
+- **Erro `Instrução ilegal` do Bun durante atualização pelo painel (`scripts/install.sh`)**: quando o `self-update` rodava via `systemd-run` como `root`, o `install.sh` baixava o Bun padrão (que exige AVX2) e falhava com `SIGILL`. Agora ele localiza qualquer Bun funcional já instalado (incluindo `/home/*/.bun/bin/bun`), baixa automaticamente a variante `bun-linux-x64-baseline` em CPUs sem AVX2 e possui fallback automático para `npm`.
+- **Limpeza de códigos ANSI no terminal de auto-atualização (`AppSelfUpdateModal.vue`)**: removidos os caracteres de escape (`[0;32m`, `[0;36m`, `[0m`) na exibição do log ao vivo.
+
 ## [1.4.4] - 26/11/2026
 
 ### 📊 Métricas de Código

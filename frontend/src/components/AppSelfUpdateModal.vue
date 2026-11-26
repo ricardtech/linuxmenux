@@ -22,7 +22,7 @@
         <pre
           ref="logBox"
           class="w-full h-96 overflow-y-auto rounded p-3 font-mono text-xs leading-relaxed text-zinc-200 whitespace-pre-wrap break-words"
-        >{{ logContent || ':: Conectando ao processo de atualização...' }}</pre>
+        >{{ cleanLogContent || ':: Conectando ao processo de atualização...' }}</pre>
       </div>
 
       <div class="px-6 py-3 border-t border-zinc-800 flex items-center justify-between bg-[#1f1f23]">
@@ -59,7 +59,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { ArrowUpCircle } from 'lucide-vue-next'
 import BaseModal from './BaseModal.vue'
 
@@ -74,6 +74,10 @@ const props = defineProps({
 defineEmits(['close', 'reload'])
 
 const logBox = ref(null)
+
+const cleanLogContent = computed(() =>
+  String(props.logContent || '').replace(/\x1b\[[0-9;]*m/g, '')
+)
 
 watch(() => props.logContent, async () => {
   await nextTick()
