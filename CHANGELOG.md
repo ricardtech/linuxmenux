@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.2] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.093 linhas** de código em **94 arquivos-fonte** (`9.279` `.vue` · `7.269` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
+### Corrigido
+- **Versão dessincronizada no cabeçalho por cache (`main.py` & `App.vue`)**: adicionado middleware `Cache-Control: no-store` para `/` e `index.html` (impedindo cache de navegador/CDN em proxy reverso) e sincronizado o badge de versão do cabeçalho/rodapé com `appUpdateInfo.current_version` retornado pelo backend.
+
 ## [1.4.1] - 26/11/2026
 
 ### 📊 Métricas de Código

@@ -2312,6 +2312,14 @@ async def websocket_system_update(websocket: WebSocket, ticket: str = Query(None
 # Mount static frontend if available
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 if os.path.exists(STATIC_DIR):
+    @app.middleware("http")
+    async def no_cache_index_middleware(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path in ("/", "/index.html"):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+        return response
+
     app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
 
