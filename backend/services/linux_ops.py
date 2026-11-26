@@ -486,13 +486,41 @@ def get_security_overview() -> Dict[str, Any]:
     # Fail2Ban
     f2b_bin = shutil.which("fail2ban-client")
     f2b_installed = bool(f2b_bin)
+    f2b_running = False
     f2b_jails: List[str] = []
+    f2b_jail_details: List[Dict[str, Any]] = []
+    f2b_currently_banned = 0
+    f2b_total_banned = 0
     if f2b_bin:
         fp = _run_cmd([f2b_bin, "status"], timeout=5)
         if fp.returncode == 0:
+            f2b_running = True
             m = re.search(r"Jail list:\s*(.+)", fp.stdout)
             if m:
                 f2b_jails = [j.strip() for j in m.group(1).split(",") if j.strip()]
+            for jname in f2b_jails:
+                jp = _run_cmd([f2b_bin, "status", jname], timeout=5)
+                cur_b = 0
+                tot_b = 0
+                ips: List[str] = []
+                if jp.returncode == 0:
+                    mc = re.search(r"Currently banned:\s*(\d+)", jp.stdout)
+                    mt = re.search(r"Total banned:\s*(\d+)", jp.stdout)
+                    mi = re.search(r"Banned IP list:\s*(.+)", jp.stdout)
+                    if mc:
+                        cur_b = int(mc.group(1))
+                    if mt:
+                        tot_b = int(mt.group(1))
+                    if mi:
+                        ips = [x.strip() for x in mi.group(1).split() if x.strip()]
+                f2b_currently_banned += cur_b
+                f2b_total_banned += tot_b
+                f2b_jail_details.append({
+                    "name": jname,
+                    "currently_banned": cur_b,
+                    "total_banned": tot_b,
+                    "banned_ips": ips,
+                })
 
     # Lynis
     lynis_bin = shutil.which("lynis")
@@ -505,7 +533,14 @@ def get_security_overview() -> Dict[str, Any]:
     return {
         "firewall": {"engine": fw_engine, "active": fw_active, "rules": fw_rules},
         "tailscale": {"installed": ts_installed, "running": ts_running, "ip": ts_ip},
-        "fail2ban": {"installed": f2b_installed, "jails": f2b_jails},
+        "fail2ban": {
+            "installed": f2b_installed,
+            "running": f2b_running,
+            "jails": f2b_jails,
+            "jail_details": f2b_jail_details,
+            "currently_banned": f2b_currently_banned,
+            "total_banned": f2b_total_banned,
+        },
         "lynis": {"installed": lynis_installed, "reports": lynis_reports},
         "api_tokens": tokens,
     }

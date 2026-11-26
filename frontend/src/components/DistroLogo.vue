@@ -4,17 +4,8 @@
     :class="badgeClass"
     :title="distroName || 'Linux'"
   >
-    <!-- BigLinux Official Stylized "big" Badge -->
-    <svg v-if="distroKey === 'biglinux'" viewBox="0 0 36 36" class="w-9 h-9">
-      <defs>
-        <linearGradient id="biglinux-bg" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0%" stop-color="#0ea5e9" />
-          <stop offset="100%" stop-color="#0284c7" />
-        </linearGradient>
-      </defs>
-      <rect width="36" height="36" rx="8" fill="url(#biglinux-bg)" />
-      <text x="18" y="23.5" text-anchor="middle" fill="#ffffff" font-family="Geist, sans-serif" font-weight="800" font-size="14" letter-spacing="-0.5">big</text>
-    </svg>
+    <!-- BigLinux Official Logo -->
+    <img v-if="distroKey === 'biglinux'" :src="distroLogoUrl" alt="BigLinux" class="w-9 h-9 object-contain p-0.5" onerror="this.src='/distro-biglinux.svg'" />
 
     <!-- Manjaro -->
     <svg v-else-if="distroKey === 'manjaro'" viewBox="0 0 36 36" class="w-6 h-6" fill="white">
@@ -52,6 +43,7 @@
 
 <script setup>
 import { computed } from 'vue'
+const distroLogoUrl = '/api/distro/logo'
 
 const props = defineProps({
   distroId: { type: String, default: '' },

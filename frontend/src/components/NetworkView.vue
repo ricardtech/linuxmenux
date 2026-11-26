@@ -192,10 +192,7 @@
           <g transform="translate(300, 210)">
             <circle r="34" fill="#18181b" stroke="#ea580c" stroke-width="3" filter="url(#glow-orange)" />
             <!-- Distro Logo inside Central Host Node -->
-            <g v-if="distroKey === 'biglinux'">
-              <circle r="18" fill="#0ea5e9" />
-              <text y="5" text-anchor="middle" fill="#ffffff" font-family="Geist, sans-serif" font-weight="800" font-size="14" letter-spacing="-0.5">big</text>
-            </g>
+            <image v-if="distroKey === 'biglinux'" :href="distroLogoUrl" x="-20" y="-20" width="40" height="40" preserveAspectRatio="xMidYMid meet" />
             <g v-else-if="distroKey === 'manjaro'">
               <path d="M-11 -11h12v6h-6v16h-6V-11zm14 0h8v22h-8V-11zm-7 8h5v14h-5V-3z" fill="#10b981" />
             </g>
@@ -357,6 +354,7 @@ const secondaryNic = computed(() =>
 const primaryNicUp = computed(() => (primaryNic.value?.status || '').toUpperCase() === 'UP')
 const secondaryNicUp = computed(() => (secondaryNic.value?.status || '').toUpperCase() === 'UP')
 
+const distroLogoUrl = '/api/distro/logo'
 const distroKey = computed(() => {
   const raw = `${props.systemData?.distro_id || ''} ${props.systemData?.distro_name || ''}`.toLowerCase()
   if (raw.includes('biglinux')) return 'biglinux'

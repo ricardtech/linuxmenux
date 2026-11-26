@@ -58,20 +58,20 @@ const dontShowAgain = ref(true)
 
 const highlights = [
   {
-    title: 'Paridade Visual 1:1 & Tipografia Legível',
-    detail: 'Tokens OKLCH oficiais, barra de navegação em 7 colunas, fonte Geist 16px e todos os componentes desacoplados em Vue 3.',
+    title: 'Paridade 1:1 Completa em Segurança & Configurações',
+    detail: 'Abas de Segurança (Autenticação, SSL/Cloudflare Tunnel, Tokens API + Swagger, Firewall, Fail2Ban com jails/IPs banidos e Lynis com PDF) e Configurações (Snippets, Otimizações, GitHub API e Notificações).',
   },
   {
-    title: 'Rede Real, vnstat 24h & Detecção de Portadora',
-    detail: 'Monitoramento real de interfaces ativas (Wi-Fi/Ethernet via LOWER_UP e carrier), histórico de 24h via vnstat + SQLite e AIOps real via OpenRouter.',
+    title: 'Rede Real, Wi-Fi Preciso & Logo Oficial da Distro',
+    detail: 'Cabo Ethernet desconectado (sem IP) marcado corretamente como Desativado, velocidade real do Wi-Fi via iw dev, latência ICMP corrigida e logotipo oficial da distribuição.',
   },
   {
-    title: 'Atualizações Multi-Distro & Terminal ao Vivo',
-    detail: 'Suporte a BigLinux/Manjaro (pamac/checkupdates), Debian/Ubuntu (apt), Fedora/RHEL (dnf) e openSUSE (zypper) com modal de atualização em tempo real.',
+    title: 'Atualizações AUR & Auto-Atualização no Modal Info',
+    detail: 'Detecção de pacotes AUR (pamac checkupdates), verificação automática de novas releases no GitHub público e botão de atualização com 1 clique no modal Info.',
   },
   {
-    title: 'Segurança Reforçada & Primeiro Acesso',
-    detail: 'Autenticação PBKDF2 + JWT, Tokens de API verificáveis, cadastro inicial de credencial e carrossel de boas-vindas.',
+    title: 'Telemetria 100% Linux/Docker (Sem /api/vms)',
+    detail: 'Coleta em lote de estatísticas reais de CPU, Memória, E/S de disco e E/S de rede dos containers Docker e Dokploy sem chamadas de VM.',
   },
 ]
 

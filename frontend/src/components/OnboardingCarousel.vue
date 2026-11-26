@@ -26,15 +26,21 @@
         </ul>
       </div>
 
-      <div class="flex items-center justify-between pt-2">
-        <div class="flex items-center gap-1.5">
-          <button
-            v-for="(s, idx) in slides"
-            :key="idx"
-            @click="step = idx"
-            class="h-2 rounded-full transition-all cursor-pointer"
-            :class="step === idx ? 'w-6 bg-blue-500' : 'w-2 bg-zinc-700 hover:bg-zinc-600'"
-          ></button>
+      <div class="flex items-center justify-between pt-2 gap-3 flex-wrap">
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-1.5">
+            <button
+              v-for="(s, idx) in slides"
+              :key="idx"
+              @click="step = idx"
+              class="h-2 rounded-full transition-all cursor-pointer"
+              :class="step === idx ? 'w-6 bg-blue-500' : 'w-2 bg-zinc-700 hover:bg-zinc-600'"
+            ></button>
+          </div>
+          <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
+            <input type="checkbox" v-model="dontShowAgain" class="rounded bg-zinc-900 border-zinc-700 accent-blue-600" />
+            <span>Não mostrar novamente ao fazer login</span>
+          </label>
         </div>
 
         <div class="flex items-center gap-2">
@@ -76,6 +82,7 @@ defineProps({
 const emit = defineEmits(['close'])
 
 const step = ref(0)
+const dontShowAgain = ref(true)
 const slides = [
   {
     icon: Activity,
@@ -117,7 +124,9 @@ const slides = [
 
 function finishOnboarding() {
   try {
-    localStorage.setItem('linuxmenux-onboarding-done', '1')
+    if (dontShowAgain.value) {
+      localStorage.setItem('linuxmenux-onboarding-done', '1')
+    }
   } catch {
     // ignore
   }

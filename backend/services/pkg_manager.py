@@ -56,7 +56,7 @@ def check_updates(force_sync: bool = False) -> Dict[str, Any]:
             parsed_lines: List[str] = []
 
             if pamac_bin:
-                proc = subprocess.run([pamac_bin, "checkupdates", "--no-aur", "-q"], capture_output=True, text=True, timeout=45)
+                proc = subprocess.run([pamac_bin, "checkupdates", "-q"], capture_output=True, text=True, timeout=45)
                 if proc.returncode in (0, 100) and proc.stdout.strip():
                     parsed_lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
 

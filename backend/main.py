@@ -107,7 +107,7 @@ from core.auth import (
 )
 from api.terminal import issue_ticket, consume_ticket, handle_terminal_session
 
-app = FastAPI(title="Linux Menux - Monitor", version="1.3.1")
+app = FastAPI(title="Linux Menux - Monitor", version="1.3.2")
 
 
 @app.middleware("http")
@@ -1286,14 +1286,14 @@ def get_app_update_status(force: bool = False):
     now = time.time()
     if not force and _APP_UPDATE_CACHE["data"] and (now - _APP_UPDATE_CACHE["ts"]) < 600:
         return _APP_UPDATE_CACHE["data"]
-    current = "1.3.1"
+    current = "1.3.2"
     latest = current
     release_url = "https://github.com/ricardtech/linuxmenux/releases"
     release_notes = ""
     published_at = ""
     tarball_url = ""
     try:
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.1"}
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.2"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"
@@ -1348,13 +1348,13 @@ def trigger_self_update():
     import tempfile
 
     status_info = get_app_update_status(force=True)
-    latest = status_info.get("latest_version") or "1.3.1"
+    latest = status_info.get("latest_version") or "1.3.2"
     tarball_url = status_info.get("tarball_url") or f"https://github.com/ricardtech/linuxmenux/archive/refs/tags/v{latest}.tar.gz"
 
     tmp_root = tempfile.mkdtemp(prefix="linuxmenux-upd-")
     tgz_path = os.path.join(tmp_root, "release.tar.gz")
     try:
-        headers = {"User-Agent": "LinuxMenux/1.3.1"}
+        headers = {"User-Agent": "LinuxMenux/1.3.2"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"
@@ -1526,9 +1526,11 @@ def get_network_latency(target: str = "1.1.1.1"):
     """Mede latência real via ping ICMP no host (sem valores hardcoded)."""
     safe_target = target.strip() if target and all(c.isalnum() or c in ".-:" for c in target.strip()) else "1.1.1.1"
     try:
-        proc = subprocess.run(["ping", "-c", "4", "-W", "2", safe_target], capture_output=True, text=True, timeout=10)
-        samples = [float(m) for m in re.findall(r"time=([0-9.]+)\s*ms", proc.stdout)]
-        loss_m = re.search(r"([0-9.]+)%\s*packet loss", proc.stdout)
+        env = os.environ.copy()
+        env["LC_ALL"] = "C"
+        proc = subprocess.run(["ping", "-c", "4", "-W", "2", safe_target], capture_output=True, text=True, timeout=10, env=env)
+        samples = [float(m.replace(",", ".")) for m in re.findall(r"(?:time|tempo)=([0-9.,]+)\s*ms", proc.stdout)]
+        loss_m = re.search(r"([0-9.]+)%\s*(?:packet loss|perda)", proc.stdout)
         loss_pct = float(loss_m.group(1)) if loss_m else (0.0 if samples else 100.0)
         return {
             "target": safe_target,
@@ -1908,9 +1910,64 @@ def get_sec_tools():
     return {"tools": []}
 
 
+@app.get("/api/distro/logo")
+def get_distro_logo():
+    """Serve the real OS distro logo SVG/PNG from the host system."""
+    candidates = [
+        "/usr/share/icons/hicolor/scalable/apps/big-logo.svg",
+        "/usr/share/icons/hicolor/scalable/apps/big-favicon-new.svg",
+        "/usr/share/pixmaps/ubuntu-logo-icon.png",
+        "/usr/share/pixmaps/debian-logo.png",
+        "/usr/share/pixmaps/archlinux-logo.svg",
+        "/usr/share/pixmaps/fedora-logo-icon.png",
+    ]
+    for p in candidates:
+        if os.path.isfile(p):
+            media = "image/svg+xml" if p.endswith(".svg") else "image/png"
+            return FileResponse(p, media_type=media)
+    fallback_svg = os.path.join(os.path.dirname(__file__), "static", "distro-biglinux.svg")
+    if os.path.isfile(fallback_svg):
+        return FileResponse(fallback_svg, media_type="image/svg+xml")
+    raise HTTPException(status_code=404, detail="Logo não encontrada")
+
+
 @app.get("/api/ssl/status")
-def get_ssl_status():
-    return {"valid": True}
+def get_ssl_status(request: Request):
+    """Detect Cloudflare Tunnel HTTPS, Reverse Proxy TLS, or local self-signed certificate."""
+    cf_ray = request.headers.get("cf-ray") or request.headers.get("cf-connecting-ip")
+    fwd_proto = (request.headers.get("x-forwarded-proto") or "").lower()
+    host_hdr = request.headers.get("host") or ""
+    is_tunnel = bool(cf_ray or (fwd_proto == "https" and "." in host_hdr))
+    if is_tunnel:
+        return {
+            "enabled": True,
+            "valid": True,
+            "mode": "cloudflare_tunnel",
+            "domain": host_hdr.split(":")[0],
+            "issuer": "Cloudflare Edge SSL (Tunnel)",
+            "cert_path": "Gerenciado pelo Cloudflare Tunnel (Zero Trust)",
+            "expires": "Renovação automática Cloudflare",
+        }
+    local_cert = "/etc/linuxmenux/ssl/cert.pem"
+    if os.path.isfile(local_cert):
+        return {
+            "enabled": True,
+            "valid": True,
+            "mode": "local_cert",
+            "domain": host_hdr.split(":")[0] or "linuxmenux.local",
+            "issuer": "Auto-Assinado Local",
+            "cert_path": local_cert,
+            "expires": "365 dias",
+        }
+    return {
+        "enabled": False,
+        "valid": False,
+        "mode": "http_local",
+        "domain": host_hdr.split(":")[0] or "localhost",
+        "issuer": "N/A",
+        "cert_path": "Nenhum certificado local",
+        "expires": "HTTP Local",
+    }
 
 
 @app.get("/api/host-update-jobs")

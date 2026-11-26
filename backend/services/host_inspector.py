@@ -340,38 +340,6 @@ def get_real_network_info() -> Dict[str, Any]:
                     except Exception:
                         pass
 
-            is_bridge = name.startswith("docker") or name.startswith("br-") or "bridge" in name
-            is_wifi = os.path.exists(f"{net_dir}/{name}/wireless") or name.startswith("wl")
-
-            if is_bridge:
-                media_type = "Bridge Docker"
-            elif is_wifi:
-                media_type = "Wi-Fi"
-            else:
-                media_type = "Ethernet"
-
-            speed_str = "Desativada" if not is_up else "1 Gbps"
-            speed_val = 0 if not is_up else 1000
-            speed_path = f"{net_dir}/{name}/speed"
-            if is_up and os.path.exists(speed_path):
-                try:
-                    with open(speed_path, "r") as sf:
-                        spd = int(sf.read().strip())
-                        if spd > 0:
-                            speed_val = spd
-                            speed_str = f"{spd} Mbps" if spd < 1000 else f"{spd // 1000} Gbps"
-                except Exception:
-                    pass
-
-            mac_str = ""
-            mac_path = f"{net_dir}/{name}/address"
-            if os.path.exists(mac_path):
-                try:
-                    with open(mac_path, "r") as mf:
-                        mac_str = mf.read().strip()
-                except Exception:
-                    pass
-
             # Obtém IP via ip addr se disponível
             ip_val = "127.0.0.1" if name == "lo" else "N/A"
             try:
@@ -382,6 +350,47 @@ def get_real_network_info() -> Dict[str, Any]:
                         ip_val = match.group(1)
             except Exception:
                 pass
+
+            is_bridge = name.startswith("docker") or name.startswith("br-") or "bridge" in name
+            is_wifi = os.path.exists(f"{net_dir}/{name}/wireless") or name.startswith("wl")
+
+            # Ethernet física sem IPv4 configurado está desconectada (mesmo que carrier/WoL marque 1)
+            if not is_bridge and not is_wifi and ip_val == "N/A":
+                is_up = False
+
+            if is_bridge:
+                media_type = "Bridge Docker"
+            elif is_wifi:
+                media_type = "Wi-Fi"
+            else:
+                media_type = "Ethernet"
+
+            speed_str = "Desativada" if not is_up else ("Wi-Fi Ativo" if is_wifi else "N/A")
+            speed_val = 0
+            if is_up and is_wifi:
+                iw_bin = shutil.which("iw")
+                if iw_bin:
+                    try:
+                        iwp = subprocess.run([iw_bin, "dev", name, "link"], capture_output=True, text=True, timeout=2)
+                        m_rate = re.search(r"tx bitrate:\s*([0-9.]+)\s*MBit/s", iwp.stdout, re.IGNORECASE)
+                        if m_rate:
+                            spd = int(round(float(m_rate.group(1))))
+                            if spd > 0:
+                                speed_val = spd
+                                speed_str = f"{spd} Mbps" if spd < 1000 else f"{round(spd / 1000, 1)} Gbps"
+                    except Exception:
+                        pass
+            else:
+                speed_path = f"{net_dir}/{name}/speed"
+                if is_up and os.path.exists(speed_path):
+                    try:
+                        with open(speed_path, "r") as sf:
+                            spd = int(sf.read().strip())
+                            if spd > 0:
+                                speed_val = spd
+                                speed_str = f"{spd} Mbps" if spd < 1000 else f"{spd // 1000} Gbps"
+                    except Exception:
+                        pass
 
             # Ler estatísticas diretamente de sysfs para precisão absoluta em tempo real
             rx_b = 0

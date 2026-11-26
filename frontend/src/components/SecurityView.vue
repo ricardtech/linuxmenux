@@ -79,7 +79,7 @@
         </div>
       </div>
 
-      <!-- 2. SSL / HTTPS -->
+      <!-- 2. SSL / HTTPS / Cloudflare Tunnel -->
       <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
         <div class="flex items-start justify-between gap-4 flex-wrap">
           <div class="flex items-start gap-3">
@@ -89,13 +89,15 @@
                 Certificado SSL / HTTPS
                 <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold border"
                   :class="sslInfo.enabled ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-zinc-800 text-zinc-400 border-zinc-700'">
-                  {{ sslInfo.enabled ? 'SSL Configurado' : 'HTTP Local' }}
+                  {{ sslInfo.mode === 'cloudflare_tunnel' ? 'Cloudflare Tunnel SSL Ativo' : (sslInfo.enabled ? 'SSL Local Configurado' : 'HTTP Local') }}
                 </span>
               </h3>
-              <p class="text-xs text-zinc-400 mt-0.5">Criptografia TLS para acesso seguro em rede local ou domínio via Reverse Proxy.</p>
+              <p class="text-xs text-zinc-400 mt-0.5">
+                {{ sslInfo.mode === 'cloudflare_tunnel' ? 'Domínio protegido automaticamente por TLS Edge via Cloudflare Tunnel (não requer certificado local).' : 'Criptografia TLS para acesso seguro em rede local ou domínio via Reverse Proxy.' }}
+              </p>
             </div>
           </div>
-          <button @click="generateSelfSignedSsl" :disabled="sslLoading" class="px-3.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold cursor-pointer">
+          <button v-if="sslInfo.mode !== 'cloudflare_tunnel'" @click="generateSelfSignedSsl" :disabled="sslLoading" class="px-3.5 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 text-xs font-semibold cursor-pointer">
             {{ sslLoading ? 'Gerando...' : 'Gerar Certificado Auto-Assinado' }}
           </button>
         </div>
@@ -106,8 +108,8 @@
             <div class="text-zinc-200 font-mono mt-0.5">{{ sslInfo.issuer || 'linuxmenux.local' }}</div>
           </div>
           <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3">
-            <div class="text-zinc-500">Caminho do Certificado</div>
-            <div class="text-zinc-200 font-mono mt-0.5 truncate">{{ sslInfo.cert_path || '/etc/linuxmenux/ssl/cert.pem' }}</div>
+            <div class="text-zinc-500">Domínio / Origem</div>
+            <div class="text-zinc-200 font-mono mt-0.5 truncate">{{ sslInfo.domain || sslInfo.cert_path || '/etc/linuxmenux/ssl/cert.pem' }}</div>
           </div>
           <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3">
             <div class="text-zinc-500">Validade</div>
@@ -203,6 +205,33 @@
           </div>
         </div>
 
+        <!-- Regras de acesso rápido (1:1 ProxMenux) -->
+        <div class="space-y-2">
+          <div class="text-xs font-semibold text-zinc-400">Regras de acesso rápido</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+            <div class="flex items-center justify-between p-3 rounded-lg bg-zinc-950/70 border border-zinc-800">
+              <div>
+                <div class="font-semibold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Linux Menux - Monitor</div>
+                <div class="text-zinc-400 mt-0.5">Monitorar porta 8008 (TCP)</div>
+              </div>
+              <button @click="$emit('update:newFwPort', '8008'); $emit('update:newFwProto', 'tcp'); $emit('update:newFwAction', 'allow'); $emit('add-fw-rule')"
+                class="px-3 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 font-semibold cursor-pointer">
+                Permitir
+              </button>
+            </div>
+            <div class="flex items-center justify-between p-3 rounded-lg bg-zinc-950/70 border border-zinc-800">
+              <div>
+                <div class="font-semibold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue-400"></span> Acesso SSH</div>
+                <div class="text-zinc-400 mt-0.5">Porta padrão SSH 22 (TCP)</div>
+              </div>
+              <button @click="$emit('update:newFwPort', '22'); $emit('update:newFwProto', 'tcp'); $emit('update:newFwAction', 'allow'); $emit('add-fw-rule')"
+                class="px-3 py-1 rounded bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 font-semibold cursor-pointer">
+                Permitir
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div class="flex items-center justify-between gap-2 flex-wrap">
           <div class="flex gap-1 bg-zinc-950 border border-zinc-800 rounded-lg p-1 text-xs">
             <button v-for="f in ['all', 'allow', 'deny']" :key="f" @click="fwFilter = f"
@@ -258,6 +287,15 @@
           </button>
         </div>
 
+        <div v-if="!securityData.fail2ban?.installed" class="p-4 rounded-xl bg-blue-950/30 border border-blue-800/40 text-xs text-blue-200 space-y-1.5">
+          <div class="font-semibold text-blue-300">O instalador irá configurar automaticamente:</div>
+          <ul class="list-disc list-inside text-zinc-300 space-y-0.5">
+            <li>Proteção SSH (sshd) contra força bruta</li>
+            <li>Monitoramento de proteção de login do painel</li>
+            <li>Configurações básicas de banimento e whitelist</li>
+          </ul>
+        </div>
+
         <div class="grid grid-cols-3 gap-3 text-center">
           <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3">
             <div class="text-lg font-bold text-white">{{ (securityData.fail2ban?.jails || []).length }}</div>
@@ -270,6 +308,21 @@
           <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3">
             <div class="text-lg font-bold text-red-400">{{ securityData.fail2ban?.total_banned || 0 }}</div>
             <div class="text-xs text-zinc-400">Total Banido</div>
+          </div>
+        </div>
+
+        <div v-if="(securityData.fail2ban?.jail_details || []).length" class="space-y-2 text-xs">
+          <div v-for="j in securityData.fail2ban.jail_details" :key="j.name" class="p-3 rounded-lg bg-zinc-950/70 border border-zinc-800 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="font-bold text-white">Jail: <span class="font-mono text-orange-400">{{ j.name }}</span></span>
+              <span class="text-zinc-400">Banidos agora: <strong class="text-amber-400">{{ j.currently_banned }}</strong> · Total: <strong class="text-red-400">{{ j.total_banned }}</strong></span>
+            </div>
+            <div v-if="(j.banned_ips || []).length" class="flex flex-wrap gap-1.5">
+              <span v-for="bip in j.banned_ips" :key="bip" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-500/15 border border-red-500/30 font-mono text-red-300">
+                {{ bip }}
+                <button @click="unbanFail2banIp(j.name, bip)" class="text-white hover:text-emerald-300 font-sans cursor-pointer">Desbanir</button>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -306,6 +359,10 @@
             <button v-else @click="$emit('run-lynis')" :disabled="lynisRunning"
               class="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs px-4 py-1.5 rounded-lg font-semibold cursor-pointer">
               {{ lynisRunning ? 'Auditando...' : 'Executar Auditoria Completa' }}
+            </button>
+            <button v-if="(securityData.lynis?.reports || []).length" @click="exportLynisPdf"
+              class="bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 text-xs px-3.5 py-1.5 rounded-lg font-semibold cursor-pointer">
+              Exportar PDF
             </button>
           </div>
         </div>
@@ -505,5 +562,23 @@ function copyToken(tok) {
   navigator.clipboard?.writeText(tok)
   tokenCopied.value = true
   setTimeout(() => { tokenCopied.value = false }, 2000)
+}
+
+async function unbanFail2banIp(jail, ip) {
+  await fetchApi('/api/security/fail2ban/unban', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jail, ip }),
+  })
+}
+
+function exportLynisPdf() {
+  const rep = props.securityData?.lynis?.reports?.[0]
+  if (!rep) return
+  const w = window.open('', '_blank', 'width=800,height=650')
+  if (!w) return
+  w.document.write(`<!doctype html><html><head><title>Relatorio Lynis - Linux Menux - Monitor</title><style>body{font-family:sans-serif;padding:32px;color:#111}h1{margin-bottom:4px}.grid{display:flex;gap:16px;margin:20px 0}.card{border:1px solid #ccc;border-radius:8px;padding:16px;flex:1;text-align:center}</style></head><body><h1>Auditoria de Segurança Lynis — Linux Menux - Monitor</h1><p>Data da auditoria: ${rep.timestamp || new Date().toLocaleString('pt-BR')}</p><div class="grid"><div class="card"><h2>${rep.hardening_index}/100</h2><div>Índice de Hardening</div></div><div class="card"><h2>${rep.warnings}</h2><div>Avisos Críticos</div></div><div class="card"><h2>${rep.suggestions}</h2><div>Sugestões</div></div></div></body></html>`)
+  w.document.close()
+  w.print()
 }
 </script>

@@ -1557,7 +1557,7 @@ async function fetchTelemetry() {
     const [sysRes, netRes, vmRes] = await Promise.all([
       fetch('/api/system').then(r => r.ok ? r.json() : null),
       fetch('/api/network').then(r => r.ok ? r.json() : null),
-      fetch('/api/vms').then(r => r.ok ? r.json() : null)
+      fetch('/api/docker/containers?all=true').then(r => r.ok ? r.json() : null)
     ])
 
     if (sysRes) {

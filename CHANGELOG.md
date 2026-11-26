@@ -2,6 +2,20 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.2] - 25/11/2026
+
+### Adicionado
+- Endpoint `GET /api/distro/logo` e logotipo oficial BigLinux (`distro-biglinux.svg`) exibido no modal de atualizações, hardware e topologia de rede SVG.
+- Detecção automática de **Cloudflare Tunnel / HTTPS** (`cf-ray`, `cf-connecting-ip`, `x-forwarded-proto`) em `/api/ssl/status` e na aba Segurança.
+- Regras de acesso rápido (porta `8008` e SSH `22`), detalhes de jails/IPs banidos no Fail2Ban e botão **Exportar PDF** na auditoria Lynis.
+- Caixa **"Não mostrar novamente ao fazer login"** no carrossel de boas-vindas e notas atualizadas em `ReleaseNotesModal.vue`.
+
+### Corrigido
+- Removido `--no-aur` do `pamac checkupdates` para detectar atualizações de pacotes AUR (como `visual-studio-code-bin`).
+- Forçado `LC_ALL=C` e regex `time|tempo` em `/api/network/latency` para medição ICMP real sem retornar `0 ms`.
+- Ethernet física sem IPv4 (`enp2s0`) marcada como `Desconectada` e velocidade real de Wi-Fi (`wlp3s0`) obtida via `iw dev link` (sem mentir `1 Gbps`).
+- Removido polling de `/api/vms` em `App.vue` (substituído por `/api/docker/containers`).
+
 ## [1.3.1] - 25/11/2026
 
 ### Alterado
