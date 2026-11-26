@@ -2,6 +2,16 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.5] - 25/11/2026
+
+### Segurança & Infraestrutura
+- **Porta `8008` fechada para a rua (`127.0.0.1`)**: `systemd/linuxmenux.service` alterado de `--host 0.0.0.0` para `--host 127.0.0.1` para impedir acesso direto pelo IP público e operar exclusivamente via Cloudflare Tunnel / localhost.
+
+### Alterado & Corrigido
+- **Fonte única de versão (`version.js`)**: `backend/main.py` agora lê `APP_VERSION` diretamente de `frontend/src/lib/version.js`, eliminando versões fixas espalhadas.
+- **Modelos de IA dinâmicos (`POST /api/ai/models`)**: adicionado carregamento real de modelos por provedor + chave de API com botão `Carregar` em `SettingsView.vue` (sem modelo fixo).
+- **Topologia SVG (`NetworkView.vue`)**: fallback usando `flowData.nics` e `default_ip` para não exibir interface Wi-Fi ativa como `Desativada`.
+
 ## [1.3.4] - 25/11/2026
 
 ### Corrigido

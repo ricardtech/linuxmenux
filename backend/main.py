@@ -107,7 +107,26 @@ from core.auth import (
 )
 from api.terminal import issue_ticket, consume_ticket, handle_terminal_session
 
-app = FastAPI(title="Linux Menux - Monitor", version="1.3.4")
+def _read_app_version() -> str:
+    """Single source of truth: reads APP_VERSION from frontend/src/lib/version.js."""
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "frontend", "src", "lib", "version.js"),
+        "/usr/local/share/linuxmenux/frontend/src/lib/version.js",
+    ]
+    for p in candidates:
+        try:
+            if os.path.isfile(p):
+                with open(p, "r", encoding="utf-8") as fh:
+                    m = re.search(r"APP_VERSION\s*=\s*['\"]([^'\"]+)['\"]", fh.read())
+                    if m:
+                        return m.group(1).strip()
+        except Exception:
+            pass
+    return "1.3.5"
+
+
+APP_VERSION = _read_app_version()
+app = FastAPI(title="Linux Menux - Monitor", version=APP_VERSION)
 
 
 @app.middleware("http")
@@ -1286,14 +1305,14 @@ def get_app_update_status(force: bool = False):
     now = time.time()
     if not force and _APP_UPDATE_CACHE["data"] and (now - _APP_UPDATE_CACHE["ts"]) < 600:
         return _APP_UPDATE_CACHE["data"]
-    current = "1.3.4"
+    current = _read_app_version()
     latest = current
     release_url = "https://github.com/ricardtech/linuxmenux/releases"
     release_notes = ""
     published_at = ""
     tarball_url = ""
     try:
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.4"}
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": f"LinuxMenux/{current}"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"
@@ -1348,13 +1367,13 @@ def trigger_self_update():
     import tempfile
 
     status_info = get_app_update_status(force=True)
-    latest = status_info.get("latest_version") or "1.3.4"
+    latest = status_info.get("latest_version") or _read_app_version()
     tarball_url = status_info.get("tarball_url") or f"https://github.com/ricardtech/linuxmenux/archive/refs/tags/v{latest}.tar.gz"
 
     tmp_root = tempfile.mkdtemp(prefix="linuxmenux-upd-")
     tgz_path = os.path.join(tmp_root, "release.tar.gz")
     try:
-        headers = {"User-Agent": "LinuxMenux/1.3.4"}
+        headers = {"User-Agent": f"LinuxMenux/{_read_app_version()}"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"
@@ -1549,6 +1568,42 @@ def get_network_latency(target: str = "1.1.1.1"):
 @app.get("/api/network/interface/{iface_name}")
 def api_network_interface_detail(iface_name: str):
     return get_interface_detail(iface_name)
+
+
+@app.post("/api/ai/models")
+async def api_list_ai_models(request: Request):
+    """Fetch available models dynamically from the selected AI provider using the user's API key."""
+    body = await request.json()
+    provider = str(body.get("provider") or "openrouter").lower().strip()
+    api_key = str(body.get("api_key") or "").strip()
+    models: List[str] = []
+    try:
+        if provider == "openrouter":
+            headers = {"Accept": "application/json", "User-Agent": f"LinuxMenux/{_read_app_version()}"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            req = urllib.request.Request("https://openrouter.ai/api/v1/models", headers=headers)
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = [str(m.get("id")) for m in (data.get("data") or []) if m.get("id")]
+        elif provider == "openai":
+            req = urllib.request.Request("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = sorted([str(m.get("id")) for m in (data.get("data") or []) if m.get("id")])
+        elif provider == "groq":
+            req = urllib.request.Request("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {api_key}"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = sorted([str(m.get("id")) for m in (data.get("data") or []) if m.get("id")])
+        elif provider == "ollama":
+            req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = [str(m.get("name")) for m in (data.get("models") or []) if m.get("name")]
+        return {"success": True, "models": models[:200]}
+    except Exception as exc:
+        return {"success": False, "models": [], "error": str(exc)}
 
 
 @app.post("/api/notifications/test")

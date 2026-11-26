@@ -346,12 +346,19 @@ const physicalNics = computed(() =>
 )
 const primaryNic = computed(() => {
   const def = props.networkData?.default_interface
-  return physicalNics.value.find((i) => i.name === def) || physicalNics.value[0] || null
+  const found = physicalNics.value.find((i) => i.name === def) || physicalNics.value[0]
+  if (found) return found
+  const flowNic = (props.flowData?.nics || []).find((n) => n.name === def) || (props.flowData?.nics || [])[0]
+  if (flowNic) return { name: flowNic.name, status: 'UP', speed: flowNic.rate || 'Ativa' }
+  return null
 })
 const secondaryNic = computed(() =>
   physicalNics.value.find((i) => i.name !== primaryNic.value?.name) || null
 )
-const primaryNicUp = computed(() => (primaryNic.value?.status || '').toUpperCase() === 'UP')
+const primaryNicUp = computed(() => {
+  if (!primaryNic.value) return Boolean(props.networkData?.default_ip && props.networkData.default_ip !== 'N/A')
+  return (primaryNic.value.status || '').toUpperCase() === 'UP'
+})
 const secondaryNicUp = computed(() => (secondaryNic.value?.status || '').toUpperCase() === 'UP')
 
 const distroLogoUrl = '/api/distro/logo'

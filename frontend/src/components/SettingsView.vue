@@ -475,7 +475,16 @@
           </div>
           <div>
             <label class="block text-zinc-300 font-medium mb-1">Modelo</label>
-            <input :value="aiModel" @input="$emit('update:aiModel', $event.target.value)" type="text" placeholder="nvidia/nemotron-3-nano-30b-a3b:reasoning:free" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+            <div class="flex gap-2">
+              <select v-if="aiModelsList.length" :value="aiModel" @change="$emit('update:aiModel', $event.target.value)" class="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono">
+                <option value="">Selecione um modelo...</option>
+                <option v-for="m in aiModelsList" :key="m" :value="m">{{ m }}</option>
+              </select>
+              <input v-else :value="aiModel" @input="$emit('update:aiModel', $event.target.value)" type="text" placeholder="Clique em Carregar para buscar modelos" class="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              <button type="button" @click="loadAiModels" :disabled="loadingAiModels" class="px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold shrink-0 cursor-pointer">
+                {{ loadingAiModels ? '...' : 'Carregar' }}
+              </button>
+            </div>
           </div>
         </div>
         <button type="button" @click="saveSection('notif')" class="w-full py-2.5 rounded-lg bg-purple-700/40 hover:bg-purple-700/60 border border-purple-500/40 text-purple-200 font-semibold cursor-pointer">
@@ -630,6 +639,28 @@ const showPushoverToken = ref(false)
 const showAiKey = ref(false)
 const showGithubToken = ref(false)
 const activeNotifChannel = ref('telegram')
+const aiModelsList = ref([])
+const loadingAiModels = ref(false)
+
+async function loadAiModels() {
+  loadingAiModels.value = true
+  try {
+    const res = await fetchApi('/api/ai/models', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: props.settingsData?.ai_provider || 'openrouter',
+        api_key: props.aiApiKey || '',
+      }),
+    })
+    if (res.ok) {
+      const d = await res.json()
+      aiModelsList.value = d.models || []
+    }
+  } finally {
+    loadingAiModels.value = false
+  }
+}
 
 const thresholdCards = [
   { title: 'Uso da CPU', subtitle: '', warnKey: 'cpu_warn', critKey: 'cpu_crit', defWarn: 85, defCrit: 95, min: 30, max: 100, unit: '%', icon: Cpu },
