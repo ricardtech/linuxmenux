@@ -2,6 +2,13 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.3] - 25/11/2026
+
+### Alterado
+- **Auditoria & Relatórios (`AuditView.vue`)**: reconstruída 1:1 com o padrão `Audit & Report` do ProxMenux (`Assessment`, `Alterações`, `Política`, `Run assessment`, `Usar como referência`, filtros por categoria e linhas expansíveis).
+- **Limites do Monitor de Integridade (`SettingsView.vue`)**: reconstruído em 2 colunas com barras visuais verde/âmbar/vermelho, alças duplas Aviso/Crítico e botão `Redefinir tudo`.
+- **Notificações & Aprimoramento de IA (`SettingsView.vue`)**: abas individuais para os 6 canais (`Telegram`, `Gotify`, `Discord`, `Email`, `Pushover`, `Apprise`) com botões de olho, categorias de notificação, Horas tranquilas, Resumo diário e bloco roxo de Aprimoramento de IA.
+
 ## [1.3.2] - 25/11/2026
 
 ### Adicionado

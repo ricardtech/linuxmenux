@@ -133,40 +133,68 @@
       </div>
     </div>
 
-    <!-- 5. Health Thresholds Card (1:1 HealthThresholds) -->
+    <!-- 5. Limites do Monitor de Integridade (1:1 ProxMenux - Imagem 12) -->
     <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
-      <div class="flex items-start justify-between gap-4">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="flex items-start gap-2.5">
-          <HeartPulse class="w-5 h-5 text-emerald-500 mt-0.5 shrink-0" />
+          <SlidersHorizontal class="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
           <div>
-            <h3 class="text-base font-semibold text-white">Monitor de integridade e limiares</h3>
-            <p class="text-xs text-zinc-400 mt-0.5">Define quando os alertas de CPU, Memória, Temperatura e Disco mudam para Aviso ou Crítico.</p>
+            <h3 class="text-base font-semibold text-white">Limites do Monitor de Integridade</h3>
+            <p class="text-xs text-zinc-400 mt-0.5">O Health Monitor e as notificações reagem quando esses limites são ultrapassados. Ajuste o nível de aviso (âmbar) e o nível crítico (vermelho).</p>
           </div>
         </div>
         <div class="flex items-center gap-2">
           <span v-if="savedCard === 'health'" class="text-xs text-emerald-400 flex items-center gap-1"><Check class="w-3.5 h-3.5" /> Salvo</span>
+          <button @click="$emit('reset-thresholds')" class="h-8 px-3 text-xs rounded-md border border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-300 flex items-center gap-1.5 cursor-pointer">
+            <RotateCcw class="w-3.5 h-3.5" /> Redefinir tudo
+          </button>
           <button v-if="editing !== 'health'" @click="editing = 'health'" class="h-8 px-3 text-xs rounded-md border border-zinc-700 bg-zinc-900/60 hover:bg-zinc-800 text-zinc-200 flex items-center gap-1.5 cursor-pointer">
             <Settings2 class="w-3.5 h-3.5" /> Editar
           </button>
-          <template v-else>
-            <button @click="$emit('reset-thresholds')" class="h-8 px-3 text-xs rounded-md border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 flex items-center gap-1 cursor-pointer"><RotateCcw class="w-3 h-3" /> Redefinir</button>
-            <button @click="saveSection('health')" class="h-8 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer"><Check class="w-3.5 h-3.5" /> Salvar</button>
-          </template>
+          <button v-else @click="saveSection('health')" class="h-8 px-3 text-xs rounded-md bg-blue-600 hover:bg-blue-500 text-white flex items-center gap-1 cursor-pointer">
+            <Check class="w-3.5 h-3.5" /> Salvar
+          </button>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-2 border-t border-zinc-800/70 text-xs tabular-nums">
-        <div v-for="item in thresholdItems" :key="item.key" class="p-3 rounded-lg bg-zinc-900/70 border border-zinc-800 space-y-1.5">
-          <div class="flex items-center justify-between">
-            <label class="text-zinc-300 font-medium">{{ item.label }}</label>
-            <span class="text-xs text-zinc-500">Rec: {{ item.rec }}{{ item.unit }}</span>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-zinc-800/70 text-xs tabular-nums">
+        <div v-for="card in thresholdCards" :key="card.warnKey" class="p-4 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-3">
+          <div>
+            <div class="text-sm font-semibold text-white flex items-center gap-2">
+              <component :is="card.icon" class="w-4 h-4 text-zinc-400" />
+              <span>{{ card.title }}</span>
+            </div>
+            <div v-if="card.subtitle" class="text-xs text-zinc-500 mt-0.5">{{ card.subtitle }}</div>
           </div>
-          <input
-            v-model.number="settingsData.thresholds[item.key]"
-            :disabled="editing !== 'health'"
-            type="number"
-            class="w-full bg-zinc-950 border border-zinc-700 rounded px-2.5 py-1.5 text-sm text-white text-right disabled:opacity-70"
-          />
+
+          <div class="flex items-center justify-end gap-4 font-bold text-sm">
+            <span class="text-amber-400">{{ getWarnVal(card) }}{{ card.unit }}</span>
+            <span class="text-red-500">{{ getCritVal(card) }}{{ card.unit }}</span>
+          </div>
+
+          <!-- Dual-Zone Visual Bar -->
+          <div class="relative h-2 rounded-full bg-zinc-800 overflow-hidden">
+            <div class="absolute inset-y-0 left-0 bg-zinc-700" :style="{ width: `${pctOf(getWarnVal(card), card.max)}%` }"></div>
+            <div class="absolute inset-y-0 bg-amber-500" :style="{ left: `${pctOf(getWarnVal(card), card.max)}%`, width: `${Math.max(2, pctOf(getCritVal(card) - getWarnVal(card), card.max))}%` }"></div>
+            <div class="absolute inset-y-0 right-0 bg-red-600/80" :style="{ left: `${pctOf(getCritVal(card), card.max)}%` }"></div>
+          </div>
+
+          <div v-if="editing === 'health'" class="grid grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="text-xs text-amber-400">Aviso ({{ card.unit }})</label>
+              <input v-model.number="settingsData.thresholds[card.warnKey]" type="range" :min="card.min" :max="card.max" class="w-full accent-amber-500 cursor-pointer" />
+            </div>
+            <div>
+              <label class="text-xs text-red-400">Crítico ({{ card.unit }})</label>
+              <input v-model.number="settingsData.thresholds[card.critKey]" type="range" :min="card.min" :max="card.max" class="w-full accent-red-500 cursor-pointer" />
+            </div>
+          </div>
+
+          <div class="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wide">
+            <span class="text-zinc-400">OK &lt; {{ getWarnVal(card) }}{{ card.unit }}</span>
+            <span class="text-amber-400">AVISAR {{ getWarnVal(card) }}-{{ getCritVal(card) }}{{ card.unit }}</span>
+            <span class="text-red-400">CRÍTICO &gt; {{ getCritVal(card) }}{{ card.unit }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -251,147 +279,208 @@
       </div>
     </div>
 
-    <!-- 8. Notifications & AI Card (1:1 NotificationSettings with sub-tabs) -->
-    <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
-      <div class="flex items-start justify-between gap-4">
+    <!-- 8. Notificações & Aprimoramento de IA (1:1 ProxMenux - Imagens 5 a 11) -->
+    <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-5">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="flex items-start gap-2.5">
-          <Bell class="w-5 h-5 text-amber-400 mt-0.5 shrink-0" />
+          <Bell class="w-5 h-5 text-blue-400 mt-0.5 shrink-0" />
           <div>
-            <h3 class="text-base font-semibold text-white">Notificações &amp; Aprimoramento de IA</h3>
-            <p class="text-xs text-zinc-400 mt-0.5">Configure canais (Telegram, Discord), eventos monitorados e análise inteligente via OpenRouter.</p>
+            <h3 class="text-base font-semibold text-white flex items-center gap-2">
+              Notificações
+              <span class="text-xs px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-semibold">
+                {{ settingsData.notifications_enabled !== false ? 'Ativo' : 'Desativado' }}
+              </span>
+            </h3>
+            <p class="text-xs text-zinc-400 mt-0.5">Configure canais de notificação e filtros de eventos. Receba alertas via Telegram, Gotify, Discord, Email, Pushover ou Apprise.</p>
           </div>
         </div>
         <div class="flex items-center gap-2">
           <span v-if="savedCard === 'notif'" class="text-xs text-emerald-400 flex items-center gap-1"><Check class="w-3.5 h-3.5" /> Salvo</span>
           <button @click="saveSection('notif')" class="h-8 px-3.5 text-xs rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold flex items-center gap-1.5 cursor-pointer">
-            <Check class="w-3.5 h-3.5" /> Salvar Notificações &amp; IA
+            <Check class="w-3.5 h-3.5" /> Salvar
           </button>
         </div>
       </div>
 
-      <!-- Sub-tabs: Canais | Eventos | IA / OpenRouter -->
-      <div class="grid grid-cols-3 bg-zinc-900 border border-zinc-800 rounded-lg p-1 text-xs font-semibold">
-        <button @click="notifTab = 'channels'" class="py-1.5 rounded-md cursor-pointer transition" :class="notifTab === 'channels' ? 'bg-blue-600 text-white' : 'text-zinc-400 hover:text-white'">
-          Canais
-        </button>
-        <button @click="notifTab = 'events'" class="py-1.5 rounded-md cursor-pointer transition" :class="notifTab === 'events' ? 'bg-blue-600 text-white' : 'text-zinc-400 hover:text-white'">
-          Eventos
-        </button>
-        <button @click="notifTab = 'ai'" class="py-1.5 rounded-md cursor-pointer transition" :class="notifTab === 'ai' ? 'bg-blue-600 text-white' : 'text-zinc-400 hover:text-white'">
-          IA (OpenRouter)
-        </button>
+      <!-- Habilitar notificações -->
+      <div class="flex items-center justify-between p-3.5 rounded-lg bg-zinc-950/60 border border-zinc-800 text-xs">
+        <div>
+          <div class="font-semibold text-white flex items-center gap-2"><Bell class="w-3.5 h-3.5 text-zinc-400" /> Habilitar notificações</div>
+          <div class="text-zinc-400 mt-0.5">Ative o serviço de notificação</div>
+        </div>
+        <input type="checkbox" v-model="settingsData.notifications_enabled" class="w-4 h-4 accent-blue-600 cursor-pointer" />
       </div>
 
-      <!-- Sub-tab: Canais -->
-      <div v-if="notifTab === 'channels'" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 text-xs">
-        <div class="p-4 rounded-lg bg-zinc-900/70 border border-zinc-800 space-y-3">
-          <div class="font-semibold text-sm text-white">Telegram Bot</div>
-          <div class="space-y-1">
-            <label class="block text-zinc-400">Bot Token</label>
-            <div class="relative">
-              <input :value="telegramToken" @input="$emit('update:telegramToken', $event.target.value)" :type="showTgToken ? 'text' : 'password'" placeholder="123456789:ABCdef..." class="w-full bg-zinc-950 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
-              <button type="button" @click="showTgToken = !showTgToken" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer">
-                <EyeOff v-if="showTgToken" class="w-3.5 h-3.5" /><Eye v-else class="w-3.5 h-3.5" />
-              </button>
+      <!-- CANAIS (6 tabs 1:1 Imagem 5) -->
+      <div class="space-y-3">
+        <div class="text-xs font-semibold uppercase tracking-wider text-zinc-400">Canais</div>
+        <div class="grid grid-cols-3 sm:grid-cols-6 bg-zinc-950 border border-zinc-800 rounded-lg p-1 gap-1 text-xs font-semibold">
+          <button v-for="ch in ['telegram', 'gotify', 'discord', 'email', 'pushover', 'apprise']" :key="ch"
+            @click="activeNotifChannel = ch"
+            class="py-1.5 rounded-md capitalize cursor-pointer transition"
+            :class="activeNotifChannel === ch ? 'bg-zinc-800 text-white shadow' : 'text-zinc-400 hover:text-white'">
+            {{ ch === 'email' ? 'Email' : ch.charAt(0).toUpperCase() + ch.slice(1) }}
+          </button>
+        </div>
+
+        <div class="p-4 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-3 text-xs">
+          <template v-if="activeNotifChannel === 'telegram'">
+            <div class="space-y-1">
+              <label class="block text-zinc-300 font-medium">Token de bot</label>
+              <div class="relative">
+                <input :value="telegramToken" @input="$emit('update:telegramToken', $event.target.value)" :type="showTgToken ? 'text' : 'password'" placeholder="123456789:ABCdef..." class="w-full bg-zinc-900 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
+                <button type="button" @click="showTgToken = !showTgToken" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
+                  <EyeOff v-if="showTgToken" class="w-4 h-4" /><Eye v-else class="w-4 h-4" />
+                </button>
+              </div>
             </div>
-          </div>
-          <div class="space-y-1">
-            <label class="block text-zinc-400">Chat ID</label>
-            <input :value="telegramChatId" @input="$emit('update:telegramChatId', $event.target.value)" type="text" placeholder="-1001234567890" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-          </div>
-          <button type="button" @click="$emit('test-telegram')" class="w-full py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold flex items-center justify-center gap-1.5 cursor-pointer">
-            <Send class="w-3.5 h-3.5" /> Testar Telegram
-          </button>
-        </div>
-
-        <div class="p-4 rounded-lg bg-zinc-900/70 border border-zinc-800 space-y-3">
-          <div class="font-semibold text-sm text-white">Discord Webhook</div>
-          <div class="space-y-1">
-            <label class="block text-zinc-400">Webhook URL</label>
-            <div class="relative">
-              <input :value="discordWebhook" @input="$emit('update:discordWebhook', $event.target.value)" :type="showDiscordUrl ? 'text' : 'password'" placeholder="https://discord.com/api/webhooks/..." class="w-full bg-zinc-950 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
-              <button type="button" @click="showDiscordUrl = !showDiscordUrl" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer">
-                <EyeOff v-if="showDiscordUrl" class="w-3.5 h-3.5" /><Eye v-else class="w-3.5 h-3.5" />
-              </button>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-zinc-300 font-medium mb-1">ID do bate-papo</label>
+                <input :value="telegramChatId" @input="$emit('update:telegramChatId', $event.target.value)" type="text" placeholder="-1001234567890" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              </div>
+              <div>
+                <label class="block text-zinc-300 font-medium mb-1">ID do tópico (opcional)</label>
+                <input v-model="settingsData.telegram_topic_id" type="text" placeholder="123456" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              </div>
             </div>
-          </div>
-          <button type="button" @click="$emit('test-discord')" class="w-full py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold flex items-center justify-center gap-1.5 cursor-pointer">
-            <Send class="w-3.5 h-3.5" /> Testar Discord
-          </button>
-        </div>
-
-        <div class="p-4 rounded-lg bg-zinc-900/70 border border-zinc-800 space-y-2.5">
-          <div class="font-semibold text-sm text-white">Gotify Server</div>
-          <input v-model="settingsData.gotify_url" type="text" placeholder="https://gotify.seu-dominio.com" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-          <input v-model="settingsData.gotify_token" type="password" placeholder="App Token Gotify" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-        </div>
-
-        <div class="p-4 rounded-lg bg-zinc-900/70 border border-zinc-800 space-y-2.5">
-          <div class="font-semibold text-sm text-white">Pushover</div>
-          <input v-model="settingsData.pushover_user" type="text" placeholder="User Key" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-          <input v-model="settingsData.pushover_token" type="password" placeholder="API Token" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-        </div>
-
-        <div class="p-4 rounded-lg bg-zinc-900/70 border border-zinc-800 space-y-2.5">
-          <div class="font-semibold text-sm text-white">E-mail (SMTP)</div>
-          <div class="grid grid-cols-2 gap-2">
-            <input v-model="settingsData.smtp_host" type="text" placeholder="smtp.gmail.com" class="bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-            <input v-model.number="settingsData.smtp_port" type="number" placeholder="587" class="bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-          </div>
-          <input v-model="settingsData.smtp_to" type="email" placeholder="alertas@seudominio.com" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-        </div>
-
-        <div class="p-4 rounded-lg bg-zinc-900/70 border border-zinc-800 space-y-2.5">
-          <div class="font-semibold text-sm text-white">Webhook Genérico / Apprise</div>
-          <input v-model="settingsData.webhook_url" type="text" placeholder="https://hooks.exemplo.com/webhook" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
-          <p class="text-zinc-500">Envia payloads JSON em tempo real para automações externas (n8n, Home Assistant, etc.).</p>
-        </div>
-      </div>
-
-      <!-- Sub-tab: Eventos -->
-      <div v-else-if="notifTab === 'events'" class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-        <div v-for="ev in eventToggles" :key="ev.key" class="flex items-center justify-between p-3 rounded-lg bg-zinc-900/70 border border-zinc-800">
-          <div>
-            <div class="font-semibold text-white">{{ ev.title }}</div>
-            <div class="text-zinc-400">{{ ev.desc }}</div>
-          </div>
-          <button
-            type="button"
-            @click="settingsData[ev.key] = !settingsData[ev.key]"
-            class="w-10 h-5 rounded-full transition-colors relative cursor-pointer"
-            :class="settingsData[ev.key] !== false ? 'bg-blue-600' : 'bg-zinc-700'"
-          >
-            <span class="block w-4 h-4 rounded-full bg-white transition-transform absolute top-0.5" :class="settingsData[ev.key] !== false ? 'translate-x-5' : 'translate-x-0.5'"></span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Sub-tab: IA -->
-      <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 text-xs">
-        <div class="space-y-1.5">
-          <label class="block text-zinc-300 font-medium">Provedor de IA</label>
-          <select v-model="settingsData.ai_provider" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white">
-            <option value="openrouter">OpenRouter</option>
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="gemini">Google Gemini</option>
-            <option value="groq">Groq</option>
-            <option value="ollama">Ollama (Local)</option>
-          </select>
-        </div>
-        <div class="space-y-1.5">
-          <label class="block text-zinc-300 font-medium">Chave da API</label>
-          <div class="relative">
-            <input :value="aiApiKey" @input="$emit('update:aiApiKey', $event.target.value)" :type="showAiKey ? 'text' : 'password'" placeholder="sk-or-v1-..." class="w-full bg-zinc-950 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
-            <button type="button" @click="showAiKey = !showAiKey" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white cursor-pointer">
-              <EyeOff v-if="showAiKey" class="w-3.5 h-3.5" /><Eye v-else class="w-3.5 h-3.5" />
+            <button type="button" @click="$emit('test-telegram')" class="px-4 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold flex items-center gap-1.5 cursor-pointer">
+              <Send class="w-3.5 h-3.5" /> Testar Telegram
             </button>
+          </template>
+
+          <template v-else-if="activeNotifChannel === 'discord'">
+            <div class="space-y-1">
+              <label class="block text-zinc-300 font-medium">Webhook URL</label>
+              <div class="relative">
+                <input :value="discordWebhook" @input="$emit('update:discordWebhook', $event.target.value)" :type="showDiscordUrl ? 'text' : 'password'" placeholder="https://discord.com/api/webhooks/..." class="w-full bg-zinc-900 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
+                <button type="button" @click="showDiscordUrl = !showDiscordUrl" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
+                  <EyeOff v-if="showDiscordUrl" class="w-4 h-4" /><Eye v-else class="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <button type="button" @click="$emit('test-discord')" class="px-4 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold flex items-center gap-1.5 cursor-pointer">
+              <Send class="w-3.5 h-3.5" /> Testar Discord
+            </button>
+          </template>
+
+          <template v-else-if="activeNotifChannel === 'gotify'">
+            <input v-model="settingsData.gotify_url" type="text" placeholder="https://gotify.seu-dominio.com" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+            <div class="relative">
+              <input v-model="settingsData.gotify_token" :type="showGotifyToken ? 'text' : 'password'" placeholder="App Token Gotify" class="w-full bg-zinc-900 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
+              <button type="button" @click="showGotifyToken = !showGotifyToken" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
+                <EyeOff v-if="showGotifyToken" class="w-4 h-4" /><Eye v-else class="w-4 h-4" />
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="activeNotifChannel === 'pushover'">
+            <input v-model="settingsData.pushover_user" type="text" placeholder="User Key" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+            <div class="relative">
+              <input v-model="settingsData.pushover_token" :type="showPushoverToken ? 'text' : 'password'" placeholder="API Token" class="w-full bg-zinc-900 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
+              <button type="button" @click="showPushoverToken = !showPushoverToken" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
+                <EyeOff v-if="showPushoverToken" class="w-4 h-4" /><Eye v-else class="w-4 h-4" />
+              </button>
+            </div>
+          </template>
+
+          <template v-else-if="activeNotifChannel === 'email'">
+            <div class="grid grid-cols-2 gap-2">
+              <input v-model="settingsData.smtp_host" type="text" placeholder="smtp.gmail.com" class="bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              <input v-model.number="settingsData.smtp_port" type="number" placeholder="587" class="bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+            </div>
+            <input v-model="settingsData.smtp_to" type="email" placeholder="alertas@seudominio.com" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+          </template>
+
+          <template v-else>
+            <input v-model="settingsData.webhook_url" type="text" placeholder="https://hooks.exemplo.com/webhook" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+            <p class="text-zinc-500">Envia payloads JSON em tempo real para automações externas (n8n, Home Assistant, Apprise).</p>
+          </template>
+        </div>
+      </div>
+
+      <!-- Categorias de notificação (1:1 Imagens 6-7) -->
+      <div class="space-y-2 text-xs">
+        <div class="font-semibold text-zinc-300 flex items-center gap-1.5"><Bell class="w-3.5 h-3.5 text-zinc-400" /> Categorias de notificação</div>
+        <div class="space-y-1.5">
+          <div v-for="cat in notifCategories" :key="cat.key" class="flex items-center justify-between px-3.5 py-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800">
+            <span class="font-medium text-emerald-400">{{ cat.label }}</span>
+            <div class="flex items-center gap-3">
+              <span class="text-zinc-400 font-mono">{{ cat.count }}</span>
+              <input type="checkbox" v-model="settingsData[cat.key]" class="w-4 h-4 accent-blue-600 cursor-pointer" />
+            </div>
           </div>
         </div>
-        <div class="space-y-1.5">
-          <label class="block text-zinc-300 font-medium">Modelo</label>
-          <input :value="aiModel" @input="$emit('update:aiModel', $event.target.value)" type="text" placeholder="nvidia/nemotron-3-nano-30b-a3b:reasoning:free" class="w-full bg-zinc-950 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+      </div>
+
+      <!-- Horas tranquilas & Resumo diário (1:1 Imagem 8) -->
+      <div class="p-4 rounded-xl bg-zinc-950/60 border border-zinc-800 space-y-4 text-xs">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-white">Horas tranquilas</div>
+            <div class="text-zinc-400">Durante esta janela apenas eventos CRÍTICOS chegam a este canal.</div>
+          </div>
+          <input type="checkbox" v-model="settingsData.quiet_hours_enabled" class="w-4 h-4 accent-blue-600 cursor-pointer" />
         </div>
+        <div class="flex items-center gap-3">
+          <span class="text-zinc-400">De</span>
+          <input v-model="settingsData.quiet_start" type="text" placeholder="22:00" class="w-20 bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1 text-white font-mono" />
+          <span class="text-zinc-400">Até</span>
+          <input v-model="settingsData.quiet_end" type="text" placeholder="06:00" class="w-20 bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1 text-white font-mono" />
+        </div>
+        <div class="pt-3 border-t border-zinc-800 flex items-center justify-between">
+          <div>
+            <div class="font-semibold text-white">Resumo diário de eventos INFO</div>
+            <div class="text-zinc-400">Os eventos INFO acumulam-se durante o dia e chegam uma vez como resumo.</div>
+          </div>
+          <input type="checkbox" v-model="settingsData.daily_digest_enabled" class="w-4 h-4 accent-blue-600 cursor-pointer" />
+        </div>
+        <div class="flex items-center gap-3">
+          <span class="text-zinc-400">Enviar em</span>
+          <input v-model="settingsData.daily_digest_time" type="text" placeholder="09:00" class="w-20 bg-zinc-900 border border-zinc-700 rounded px-2.5 py-1 text-white font-mono" />
+        </div>
+      </div>
+
+      <!-- Aprimoramento de IA (1:1 Imagens 9-11) -->
+      <div class="p-4 rounded-xl bg-zinc-950/70 border border-purple-500/30 space-y-4 text-xs">
+        <div class="flex items-center justify-between">
+          <div>
+            <div class="text-sm font-bold text-white flex items-center gap-2">
+              <Sparkles class="w-4 h-4 text-purple-400" /> Aprimoramento de IA
+            </div>
+            <div class="text-zinc-400 mt-0.5">Use IA para gerar mensagens de notificação contextuais</div>
+          </div>
+          <input type="checkbox" v-model="settingsData.ai_enabled" class="w-4 h-4 accent-purple-500 cursor-pointer" />
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div>
+            <label class="block text-zinc-300 font-medium mb-1">Provedor</label>
+            <select v-model="settingsData.ai_provider" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white">
+              <option value="openrouter">OpenRouter</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="groq">Groq</option>
+              <option value="ollama">Ollama (Local)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-zinc-300 font-medium mb-1">Chave de API</label>
+            <div class="relative">
+              <input :value="aiApiKey" @input="$emit('update:aiApiKey', $event.target.value)" :type="showAiKey ? 'text' : 'password'" placeholder="sk-or-v1-..." class="w-full bg-zinc-900 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
+              <button type="button" @click="showAiKey = !showAiKey" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
+                <EyeOff v-if="showAiKey" class="w-4 h-4" /><Eye v-else class="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="block text-zinc-300 font-medium mb-1">Modelo</label>
+            <input :value="aiModel" @input="$emit('update:aiModel', $event.target.value)" type="text" placeholder="nvidia/nemotron-3-nano-30b-a3b:reasoning:free" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+          </div>
+        </div>
+        <button type="button" @click="saveSection('notif')" class="w-full py-2.5 rounded-lg bg-purple-700/40 hover:bg-purple-700/60 border border-purple-500/40 text-purple-200 font-semibold cursor-pointer">
+          ⚡ Salvar e Testar Conexão IA
+        </button>
       </div>
     </div>
 
@@ -510,7 +599,8 @@
 import { ref, onMounted } from 'vue'
 import {
   Globe2, Ruler, Layers, HardDrive, HeartPulse, Network, Database, Bell,
-  Settings2, Check, RotateCcw, Eye, EyeOff, Send, Code, Sparkles, Copy, Trash2, Plus, Package
+  Settings2, Check, RotateCcw, Eye, EyeOff, Send, Code, Sparkles, Copy, Trash2, Plus, Package,
+  SlidersHorizontal, Cpu, MemoryStick, Thermometer
 } from 'lucide-vue-next'
 import { fetchApi } from '../lib/api-config'
 
@@ -535,8 +625,36 @@ const savedCard = ref('')
 const notifTab = ref('channels')
 const showTgToken = ref(false)
 const showDiscordUrl = ref(false)
+const showGotifyToken = ref(false)
+const showPushoverToken = ref(false)
 const showAiKey = ref(false)
 const showGithubToken = ref(false)
+const activeNotifChannel = ref('telegram')
+
+const thresholdCards = [
+  { title: 'Uso da CPU', subtitle: '', warnKey: 'cpu_warn', critKey: 'cpu_crit', defWarn: 85, defCrit: 95, min: 30, max: 100, unit: '%', icon: Cpu },
+  { title: 'Espaço em disco - host', subtitle: 'Aplica-se a / e aos pontos de montagem locais.', warnKey: 'disk_warn', critKey: 'disk_crit', defWarn: 85, defCrit: 95, min: 30, max: 100, unit: '%', icon: HardDrive },
+  { title: 'Memória e swap', subtitle: 'RAM do sistema', warnKey: 'mem_warn', critKey: 'mem_crit', defWarn: 85, defCrit: 95, min: 30, max: 100, unit: '%', icon: MemoryStick },
+  { title: 'Temperatura da CPU', subtitle: 'Sensores coretemp / k10temp', warnKey: 'temp_warn', critKey: 'temp_crit', defWarn: 75, defCrit: 90, min: 30, max: 105, unit: '°C', icon: Thermometer },
+]
+
+function getWarnVal(card) {
+  return Number(props.settingsData?.thresholds?.[card.warnKey] ?? card.defWarn)
+}
+function getCritVal(card) {
+  return Number(props.settingsData?.thresholds?.[card.critKey] ?? card.defCrit)
+}
+function pctOf(val, max) {
+  return Math.max(0, Math.min(100, Math.round((Number(val) / max) * 100)))
+}
+
+const notifCategories = [
+  { key: 'notify_containers', label: 'Containers Docker', count: '4/4' },
+  { key: 'notify_backups', label: 'Cópias de segurança', count: '6/6' },
+  { key: 'notify_health', label: 'Recursos & Monitor de Saúde', count: '6/7' },
+  { key: 'notify_updates', label: 'Atualizações', count: '10/11' },
+  { key: 'notify_security', label: 'Segurança', count: '4/4' },
+]
 const snippets = ref([])
 const newSnippet = ref({ name: '', command: '' })
 const optimizations = ref([])
