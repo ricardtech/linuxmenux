@@ -107,7 +107,7 @@ from core.auth import (
 )
 from api.terminal import issue_ticket, consume_ticket, handle_terminal_session
 
-app = FastAPI(title="Linux Menux - Monitor", version="1.3.3")
+app = FastAPI(title="Linux Menux - Monitor", version="1.3.4")
 
 
 @app.middleware("http")
@@ -1286,14 +1286,14 @@ def get_app_update_status(force: bool = False):
     now = time.time()
     if not force and _APP_UPDATE_CACHE["data"] and (now - _APP_UPDATE_CACHE["ts"]) < 600:
         return _APP_UPDATE_CACHE["data"]
-    current = "1.3.3"
+    current = "1.3.4"
     latest = current
     release_url = "https://github.com/ricardtech/linuxmenux/releases"
     release_notes = ""
     published_at = ""
     tarball_url = ""
     try:
-        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.3"}
+        headers = {"Accept": "application/vnd.github+json", "User-Agent": "LinuxMenux/1.3.4"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"
@@ -1348,13 +1348,13 @@ def trigger_self_update():
     import tempfile
 
     status_info = get_app_update_status(force=True)
-    latest = status_info.get("latest_version") or "1.3.3"
+    latest = status_info.get("latest_version") or "1.3.4"
     tarball_url = status_info.get("tarball_url") or f"https://github.com/ricardtech/linuxmenux/archive/refs/tags/v{latest}.tar.gz"
 
     tmp_root = tempfile.mkdtemp(prefix="linuxmenux-upd-")
     tgz_path = os.path.join(tmp_root, "release.tar.gz")
     try:
-        headers = {"User-Agent": "LinuxMenux/1.3.3"}
+        headers = {"User-Agent": "LinuxMenux/1.3.4"}
         gh_token = os.environ.get("GITHUB_TOKEN", "").strip()
         if gh_token:
             headers["Authorization"] = f"Bearer {gh_token}"
@@ -1374,7 +1374,7 @@ def trigger_self_update():
             raise HTTPException(status_code=500, detail="scripts/install.sh não encontrado na release.")
 
         subprocess.Popen(
-            ["/bin/bash", "-c", f"sleep 1 && bash '{install_script}' >> /var/log/linuxmenux-update.log 2>&1 && rm -rf '{tmp_root}'"],
+            ["/bin/bash", "-c", f"sleep 1 && LINUXMENUX_SKIP_BUILD=1 bash '{install_script}' >> /var/log/linuxmenux-update.log 2>&1 && rm -rf '{tmp_root}'"],
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

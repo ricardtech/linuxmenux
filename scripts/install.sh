@@ -78,7 +78,7 @@ mkdir -p /var/lib/linuxmenux /etc/linuxmenux /var/backups/linuxmenux
 # 3. Setup Project Structure & Build Frontend
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [ -d "${SCRIPT_DIR}/frontend" ]; then
+if [ -d "${SCRIPT_DIR}/frontend" ] && [ "${LINUXMENUX_SKIP_BUILD:-0}" != "1" ]; then
     msg_info "Garantindo build atualizado do frontend Vue 3 (Bun)..."
     BUN_BIN=""
     if [ -n "${SUDO_USER:-}" ] && [ -x "/home/${SUDO_USER}/.bun/bin/bun" ]; then
@@ -89,24 +89,26 @@ if [ -d "${SCRIPT_DIR}/frontend" ]; then
         BUN_BIN="/root/.bun/bin/bun"
     fi
 
-    if [ -z "${BUN_BIN}" ]; then
+    if [ -z "${BUN_BIN}" ] && [ ! -f "${SCRIPT_DIR}/backend/static/index.html" ]; then
         msg_info "Bun v1.4.5 não encontrado. Instalando Bun v1.4.5 automaticamente..."
         if [ -n "${SUDO_USER:-}" ]; then
-            sudo -u "${SUDO_USER}" bash -c 'curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5"'
+            sudo -u "${SUDO_USER}" bash -c 'curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5"' || true
             BUN_BIN="/home/${SUDO_USER}/.bun/bin/bun"
         else
-            curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5"
+            curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.5" || true
             BUN_BIN="/root/.bun/bin/bun"
         fi
     fi
 
-    if [ -x "${BUN_BIN}" ]; then
+    if [ -n "${BUN_BIN}" ] && [ -x "${BUN_BIN}" ] && "${BUN_BIN}" --version >/dev/null 2>&1; then
         if [ -n "${SUDO_USER:-}" ]; then
             sudo -u "${SUDO_USER}" bash -c "cd '${SCRIPT_DIR}/frontend' && '${BUN_BIN}' install --frozen-lockfile && '${BUN_BIN}' run build"
         else
             (cd "${SCRIPT_DIR}/frontend" && "${BUN_BIN}" install --frozen-lockfile && "${BUN_BIN}" run build)
         fi
         msg_ok "Frontend compilado com sucesso via Bun!"
+    elif [ -f "${SCRIPT_DIR}/backend/static/index.html" ]; then
+        msg_warn "Bun indisponível ou incompatível neste usuário; utilizando build pré-compilado de backend/static/."
     else
         msg_error "Falha ao instalar ou localizar o Bun v1.4.5."
         exit 1

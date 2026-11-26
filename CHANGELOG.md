@@ -2,6 +2,11 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.4] - 25/11/2026
+
+### Corrigido
+- **Auto-atualização (`scripts/install.sh` & `POST /api/proxmenux/self-update`)**: corrigido erro de `Instrução ilegal` (`SIGILL`) ao executar `/root/.bun/bin/bun` durante a atualização em segundo plano; agora utiliza `LINUXMENUX_SKIP_BUILD=1` e o build pré-compilado de `backend/static/` quando `bun --version` não estiver funcional para `root`, garantindo atualizações futuras com 1 clique pelo modal `Info`.
+
 ## [1.3.3] - 25/11/2026
 
 ### Alterado
