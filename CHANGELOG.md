@@ -2,6 +2,11 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.9] - 26/11/2026
+
+### Corrigido
+- **Auto-atualização fora do cgroup (`systemd-run`)**: `POST /api/proxmenux/self-update` agora executa o `install.sh` via `systemd-run --unit=linuxmenux-self-update --collect`, evitando que o `systemctl stop linuxmenux.service` dentro do instalador mate o próprio processo atualizador antes de reiniciar o serviço.
+
 ## [1.3.8] - 25/11/2026
 
 ### Alterado & Corrigido

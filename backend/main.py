@@ -1393,12 +1393,22 @@ def trigger_self_update():
         if not os.path.isfile(install_script):
             raise HTTPException(status_code=500, detail="scripts/install.sh não encontrado na release.")
 
-        subprocess.Popen(
-            ["/bin/bash", "-c", f"sleep 1 && LINUXMENUX_SKIP_BUILD=1 bash '{install_script}' >> /var/log/linuxmenux-update.log 2>&1 && rm -rf '{tmp_root}'"],
-            start_new_session=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        update_cmd = f"sleep 1 && LINUXMENUX_SKIP_BUILD=1 bash '{install_script}' >> /var/log/linuxmenux-update.log 2>&1; rm -rf '{tmp_root}'"
+        systemd_run = shutil.which("systemd-run")
+        if systemd_run:
+            subprocess.Popen(
+                [systemd_run, "--unit=linuxmenux-self-update", "--collect", "/bin/bash", "-c", update_cmd],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.Popen(
+                ["/bin/bash", "-c", update_cmd],
+                start_new_session=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
         return {
             "success": True,
             "target_version": latest,
