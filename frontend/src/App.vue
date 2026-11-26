@@ -6,21 +6,21 @@
     <!-- Top Header (Fiel ao ProxMenux Monitor) -->
     <header class="border-b px-4 lg:px-6 py-2.5 sticky top-0 z-50 transition-colors"
       :class="isDarkTheme ? 'bg-[#1f1f23] border-zinc-800' : 'bg-white border-zinc-200'">
-      <div class="container mx-auto flex items-center justify-between gap-4">
+      <div class="container mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
         <!-- Logo & Branding (Linux Menux official SVG logo) -->
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
           <img src="/logo.svg" alt="Linux Menux - Monitor" class="w-9 h-9 rounded-lg shadow-lg shadow-orange-500/20 shrink-0" />
-          <div>
-            <div class="flex items-center gap-2">
-              <h1 class="text-base font-bold text-white tracking-tight">Linux Menux - Monitor</h1>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h1 class="text-base font-bold text-white tracking-tight truncate">Linux Menux - Monitor</h1>
               <span class="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded tabular-nums font-semibold">v{{ APP_VERSION }}</span>
             </div>
-            <p class="text-xs text-zinc-400 font-medium">Painel do sistema {{ systemData.distro_name || 'Linux' }}</p>
+            <p class="text-xs text-zinc-400 font-medium truncate">Painel do sistema {{ systemData.distro_name || 'Linux' }}</p>
           </div>
         </div>
 
         <!-- System Status Badges & Controls -->
-        <div class="flex items-center gap-2 lg:gap-3 flex-wrap justify-end">
+        <div class="flex items-center gap-1.5 sm:gap-2 lg:gap-3 flex-wrap justify-between sm:justify-end">
           <!-- Node Selector Pill -->
           <div class="relative">
             <button @click="nodeDropdownOpen = !nodeDropdownOpen"
@@ -514,6 +514,7 @@
 
     <!-- Footer -->
     <footer class="bg-[#18181b] border-t border-zinc-800/80 px-6 py-4 text-center text-xs text-zinc-400 tabular-nums">
+      Linux Menux v1.2.9 · Painel de Controle Linux, Docker Swarm & Dokploy · Multi-Distro
       Linux Menux - Monitor v{{ APP_VERSION }} · Painel de Controle Linux, Docker Swarm & Dokploy · Multi-Distro
     </footer>
   </div>
@@ -2048,6 +2049,11 @@ const handleResize = () => {
 
 onMounted(async () => {
   try {
+    const urlTok = new URLSearchParams(window.location.search).get('token')
+    if (urlTok && urlTok.trim()) {
+      setAuthToken(urlTok.trim())
+      window.history.replaceState({}, '', window.location.pathname)
+    }
     const savedTheme = localStorage.getItem('linuxmenux-theme')
     if (savedTheme === 'light') isDarkTheme.value = false
   } catch {}

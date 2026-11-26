@@ -2,6 +2,16 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.7] - 25/11/2026
+
+### Adicionado
+- Suporte a login automático via `?token=lmx_...` na URL em `App.vue` (ideal para WebView do **Ricard Hub - Desktop**), além do cabeçalho `Authorization: Bearer lmx_...`.
+
+### Corrigido
+- Adicionado `import shutil` em `backend/services/host_inspector.py`, corrigindo o `HTTP 500` em `/api/network`, `/api/network/flow` e `/api/health/full` (que fazia o modal `Estado de saúde do sistema` exibir `0 Total`).
+- Removida a tag duplicada `v1.2.9` ao lado de `v1.3.x` no cabeçalho de `App.vue`.
+- Melhorada a responsividade mobile do cabeçalho em `App.vue` (`flex-col sm:flex-row`, truncamento limpo e quebra responsiva dos controles em telas `360px`).
+
 ## [1.3.6] - 25/11/2026
 
 ### Corrigido

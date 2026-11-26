@@ -7,6 +7,7 @@ import glob
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import time
@@ -391,6 +392,15 @@ def get_real_network_info() -> Dict[str, Any]:
                                 speed_str = f"{spd} Mbps" if spd < 1000 else f"{spd // 1000} Gbps"
                     except Exception:
                         pass
+
+            mac_str = ""
+            mac_path = f"{net_dir}/{name}/address"
+            if os.path.exists(mac_path):
+                try:
+                    with open(mac_path, "r") as mf:
+                        mac_str = mf.read().strip()
+                except Exception:
+                    pass
 
             # Ler estatísticas diretamente de sysfs para precisão absoluta em tempo real
             rx_b = 0

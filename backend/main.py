@@ -560,6 +560,7 @@ def get_health_full(force_updates: bool = False):
                 },
                 {
                     "label": "Linux Menux",
+                    "detail": "A versão 1.2.9 está atualizada",
                     "detail": f"A versão {_read_app_version()} está atualizada",
                     "ok": True,
                 },
