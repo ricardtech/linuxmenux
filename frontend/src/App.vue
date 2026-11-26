@@ -524,7 +524,6 @@
 
     <!-- Footer -->
     <footer class="bg-[#18181b] border-t border-zinc-800/80 px-6 py-4 text-center text-xs text-zinc-400 tabular-nums">
-      Linux Menux v1.2.9 · Painel de Controle Linux, Docker Swarm & Dokploy · Multi-Distro
       Linux Menux - Monitor v{{ appUpdateInfo?.current_version || APP_VERSION }} · Painel de Controle Linux, Docker Swarm & Dokploy · Multi-Distro
     </footer>
   </div>

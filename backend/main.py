@@ -1427,9 +1427,11 @@ def trigger_self_update():
             _append_update_log("✗ Erro: scripts/install.sh não encontrado na release.")
             raise HTTPException(status_code=500, detail="scripts/install.sh não encontrado na release.")
 
+        static_index = os.path.join(repo_dir, "backend", "static", "index.html")
+        skip_build_flag = "LINUXMENUX_SKIP_BUILD=1 " if os.path.isfile(static_index) else ""
         _append_update_log(":: Executando instalador oficial (scripts/install.sh)...")
         update_cmd = (
-            f"sleep 1 && LINUXMENUX_SKIP_BUILD=1 bash '{install_script}' >> '{SELF_UPDATE_LOG}' 2>&1; "
+            f"sleep 1 && {skip_build_flag}bash '{install_script}' >> '{SELF_UPDATE_LOG}' 2>&1; "
             f"rc=$?; rm -rf '{tmp_root}'; "
             f"if [ $rc -eq 0 ]; then echo '__LINUXMENUX_UPDATE_DONE__' >> '{SELF_UPDATE_LOG}'; "
             f"else echo \"__LINUXMENUX_UPDATE_FAILED__:$rc\" >> '{SELF_UPDATE_LOG}'; fi"

@@ -2,6 +2,16 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.3] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.094 linhas** de código em **94 arquivos-fonte** (`9.278` `.vue` · `7.271` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
+### Corrigido
+- **Auto-atualização via GitHub (`main.py`)**: removido `LINUXMENUX_SKIP_BUILD=1` quando `backend/static/index.html` não está presente no tarball da release do GitHub (já que `static/` fica no `.gitignore`), garantindo que `install.sh` compile o novo frontend Vue 3 durante a atualização pelo painel.
+- **Detecção de atualizações AUR no BigLinux/Manjaro (`pkg_manager.py`)**: adicionado flag `-a` em `pamac checkupdates -a -q` (mantendo o filtro `vercmp` anti-downgrade), passando a detectar atualizações reais do AUR em paridade 1:1 com o escudo do sistema.
+- **Texto duplicado no rodapé (`App.vue`)**: removida a linha fixa residual `Linux Menux v1.2.9 · Painel de Controle Linux, Docker Swarm & Dokploy · Multi-Distro` que aparecia repetida antes da versão dinâmica.
+
 ## [1.4.2] - 26/11/2026
 
 ### 📊 Métricas de Código
