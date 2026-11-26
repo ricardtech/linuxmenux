@@ -1362,9 +1362,20 @@ def get_app_update_status(force: bool = False):
     return data
 
 
+SELF_UPDATE_LOG = "/var/log/linuxmenux-update.log"
+
+
+def _append_update_log(line: str):
+    try:
+        with open(SELF_UPDATE_LOG, "a", encoding="utf-8") as fh:
+            fh.write(line.rstrip("\n") + "\n")
+    except Exception:
+        pass
+
+
 @app.post("/api/proxmenux/self-update")
 def trigger_self_update():
-    """Download latest public release from GitHub, run installer/update, and restart service."""
+    """Download latest public release from GitHub, run installer/update, and stream progress via log."""
     import shutil
     import tarfile
     import tempfile
@@ -1372,6 +1383,13 @@ def trigger_self_update():
     status_info = get_app_update_status(force=True)
     latest = status_info.get("latest_version") or _read_app_version()
     tarball_url = status_info.get("tarball_url") or f"https://github.com/ricardtech/linuxmenux/archive/refs/tags/v{latest}.tar.gz"
+
+    try:
+        with open(SELF_UPDATE_LOG, "w", encoding="utf-8") as fh:
+            fh.write(f":: Iniciando atualização do Linux Menux - Monitor para v{latest}...\n")
+            fh.write(f":: Baixando pacote: {tarball_url}\n")
+    except Exception:
+        pass
 
     tmp_root = tempfile.mkdtemp(prefix="linuxmenux-upd-")
     tgz_path = os.path.join(tmp_root, "release.tar.gz")
@@ -1384,6 +1402,7 @@ def trigger_self_update():
         with urllib.request.urlopen(req, timeout=30) as resp, open(tgz_path, "wb") as fh:
             shutil.copyfileobj(resp, fh)
 
+        _append_update_log("✓ Pacote baixado com sucesso. Extraindo arquivos...")
         extract_dir = os.path.join(tmp_root, "src")
         os.makedirs(extract_dir, exist_ok=True)
         with tarfile.open(tgz_path, "r:gz") as tf:
@@ -1393,9 +1412,16 @@ def trigger_self_update():
         repo_dir = next((e for e in entries if os.path.isdir(e)), extract_dir)
         install_script = os.path.join(repo_dir, "scripts", "install.sh")
         if not os.path.isfile(install_script):
+            _append_update_log("✗ Erro: scripts/install.sh não encontrado na release.")
             raise HTTPException(status_code=500, detail="scripts/install.sh não encontrado na release.")
 
-        update_cmd = f"sleep 1 && LINUXMENUX_SKIP_BUILD=1 bash '{install_script}' >> /var/log/linuxmenux-update.log 2>&1; rm -rf '{tmp_root}'"
+        _append_update_log(":: Executando instalador oficial (scripts/install.sh)...")
+        update_cmd = (
+            f"sleep 1 && LINUXMENUX_SKIP_BUILD=1 bash '{install_script}' >> '{SELF_UPDATE_LOG}' 2>&1; "
+            f"rc=$?; rm -rf '{tmp_root}'; "
+            f"if [ $rc -eq 0 ]; then echo '__LINUXMENUX_UPDATE_DONE__' >> '{SELF_UPDATE_LOG}'; "
+            f"else echo \"__LINUXMENUX_UPDATE_FAILED__:$rc\" >> '{SELF_UPDATE_LOG}'; fi"
+        )
         systemd_run = shutil.which("systemd-run")
         if systemd_run:
             subprocess.Popen(
@@ -1414,13 +1440,49 @@ def trigger_self_update():
         return {
             "success": True,
             "target_version": latest,
-            "message": f"Atualização para v{latest} iniciada em segundo plano. O painel reiniciará em instantes.",
+            "message": f"Atualização para v{latest} iniciada. Acompanhe o progresso no terminal.",
         }
     except HTTPException:
         raise
     except Exception as exc:
+        _append_update_log(f"✗ Falha ao baixar/aplicar atualização: {exc}")
+        _append_update_log("__LINUXMENUX_UPDATE_FAILED__:1")
         shutil.rmtree(tmp_root, ignore_errors=True)
         raise HTTPException(status_code=500, detail=f"Falha ao baixar/aplicar atualização: {exc}")
+
+
+@app.get("/api/proxmenux/self-update/log")
+def get_self_update_log():
+    """Return live self-update log output, running status, and active backend version."""
+    log_text = ""
+    if os.path.exists(SELF_UPDATE_LOG):
+        try:
+            with open(SELF_UPDATE_LOG, "r", encoding="utf-8", errors="ignore") as fh:
+                log_text = fh.read()
+        except Exception:
+            log_text = ""
+
+    done = "__LINUXMENUX_UPDATE_DONE__" in log_text
+    failed = "__LINUXMENUX_UPDATE_FAILED__" in log_text
+    running = False
+    if not done and not failed:
+        try:
+            p = subprocess.run(["systemctl", "is-active", "linuxmenux-self-update"], capture_output=True, text=True, timeout=2)
+            running = p.returncode == 0 and p.stdout.strip() in ("active", "activating")
+        except Exception:
+            running = False
+
+    clean_log = "\n".join(
+        line for line in log_text.splitlines()
+        if not line.startswith("__LINUXMENUX_UPDATE_")
+    )
+    return {
+        "log": clean_log,
+        "running": running,
+        "done": done,
+        "failed": failed,
+        "current_version": _read_app_version(),
+    }
 
 
 # ─── Docker, Compose & Swarm Endpoints ─────────────────────────────────────
@@ -1822,6 +1884,7 @@ async def api_fail2ban_unban(request: Request):
 
 @app.post("/api/security/fail2ban/ignoreip")
 async def api_fail2ban_ignoreip(request: Request):
+    import shutil
     body = await request.json()
     ip = str(body.get("ip") or "").strip()
     action = str(body.get("action") or "add")
@@ -1833,7 +1896,43 @@ async def api_fail2ban_ignoreip(request: Request):
         trusted = [x for x in trusted if x != ip]
     settings["fail2ban_trusted_ips"] = trusted
     save_settings(settings)
+
+    f2b = shutil.which("fail2ban-client")
+    if f2b and ip:
+        try:
+            st = subprocess.run([f2b, "status"], capture_output=True, text=True, timeout=4)
+            if st.returncode == 0:
+                m = re.search(r"Jail list:\s*(.+)", st.stdout)
+                jails = [j.strip() for j in m.group(1).split(",") if j.strip()] if m else []
+                cmd_op = "addignoreip" if action == "add" else "delignoreip"
+                for j in jails:
+                    subprocess.run([f2b, "set", j, cmd_op, ip], capture_output=True, text=True, timeout=3)
+        except Exception:
+            pass
+
     return {"success": True, "trusted_ips": trusted}
+
+
+@app.post("/api/security/fail2ban/uninstall")
+async def api_fail2ban_uninstall():
+    import shutil
+    try:
+        subprocess.run(["systemctl", "disable", "--now", "fail2ban"], capture_output=True, text=True, timeout=15)
+    except Exception:
+        pass
+    cmd = None
+    if shutil.which("apt-get"):
+        cmd = ["apt-get", "remove", "-y", "fail2ban"]
+    elif shutil.which("pacman"):
+        cmd = ["pacman", "-Rns", "--noconfirm", "fail2ban"]
+    elif shutil.which("dnf"):
+        cmd = ["dnf", "remove", "-y", "fail2ban"]
+    elif shutil.which("zypper"):
+        cmd = ["zypper", "remove", "-y", "fail2ban"]
+    if not cmd:
+        return {"success": False, "error": "Gerenciador de pacotes não suportado para desinstalação automática."}
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
 
 @app.get("/api/snippets")
@@ -1954,7 +2053,38 @@ def get_sec_firewall_status():
 
 @app.get("/api/security/fail2ban/activity")
 def get_sec_fail2ban_act():
-    return {"jails": []}
+    events = []
+    log_path = "/var/log/fail2ban.log"
+    lines = []
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as fh:
+                lines = fh.readlines()[-200:]
+        except Exception:
+            lines = []
+    if not lines:
+        try:
+            p = subprocess.run(["journalctl", "-u", "fail2ban", "-n", "120", "--no-pager"], capture_output=True, text=True, timeout=5)
+            if p.returncode == 0:
+                lines = p.stdout.splitlines()
+        except Exception:
+            lines = []
+    for raw in reversed(lines):
+        s = raw.strip()
+        if not s:
+            continue
+        m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}).*?\[([^\]]+)\]\s+(Ban|Unban|Found)\s+([0-9a-fA-F.:]+)", s)
+        if m:
+            events.append({
+                "timestamp": m.group(1),
+                "jail": m.group(2),
+                "action": m.group(3),
+                "ip": m.group(4),
+                "raw": s,
+            })
+        if len(events) >= 40:
+            break
+    return {"events": events}
 
 
 @app.get("/api/security/fail2ban/details")

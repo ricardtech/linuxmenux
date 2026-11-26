@@ -2,6 +2,22 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.0] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.010 linhas** de código em **94 arquivos-fonte** (`9.279` `.vue` · `7.186` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
+### Adicionado
+- **Terminal ao vivo na auto-atualização do painel (`AppSelfUpdateModal.vue` & `/api/proxmenux/self-update/log`)**: ao clicar em atualizar o **Linux Menux - Monitor**, abre um modal de terminal em tempo real exibindo download, extração, instalação e reinício do serviço, recarregando a página somente após confirmar a nova versão ativa.
+- **Dados completos e atividade do Fail2Ban (`linux_ops.py` & `main.py`)**: detecção automática de versão (`fail2ban-client --version`), parâmetros por jail (`maxretry`, `bantime`, `findtime`), contadores de tentativas falhadas (`currently_failed`, `total_failed`), leitura de eventos reais (`/api/security/fail2ban/activity`), sincronização ao vivo de `ignoreip` (`addignoreip`/`delignoreip`) e endpoint de desinstalação (`/api/security/fail2ban/uninstall`).
+
+### Alterado
+- **Fail2Ban idêntico ao ProxMenux Monitor (`SecurityView.vue`)**: redesign completo sem fundo preto (`bg-zinc-950`), mantendo o tamanho de fonte padrão do painel, com card de status do serviço, tabela de *Endereços IP e redes confiáveis* (`127.0.0.0/8` e `::1` como `SISTEMA / Obrigatório` + IPs customizados), 4 KPIs (`PROTEÇÕES`, `IPS BLOQUEADOS`, `TOTAL DE BLOCOS`, `TENTATIVAS FALHADAS`), abas *Proteções e IPs bloqueados* / *Atividade*, cards detalhados por jail e modal de confirmação de instalação.
+- **Regra de versionamento semântico (`AGENTS.md`)**: após `.9`, o número de versão incrementa o *minor* e zera o *patch* (`1.3.9 → 1.4.0`, nunca `.10` ou `.11`).
+
+### Corrigido
+- **Auto-atualização prematura no Frontend (`App.vue`)**: corrigido o polling de `3s` em `/api/auth/status` que recarregava a página antes do `install.sh` terminar (~29s) e reiniciar o serviço na versão nova.
+
 ## [1.3.11] - 26/11/2026
 
 ### 📊 Métricas de Código

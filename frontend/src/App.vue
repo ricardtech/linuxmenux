@@ -452,6 +452,15 @@
         :distro-name="systemData.distro_name"
         @close="closeSystemUpdateModal()"
       />
+      <AppSelfUpdateModal
+        :open="selfUpdateModalOpen"
+        :target-version="selfUpdateTarget"
+        :log-content="selfUpdateLog"
+        :status="selfUpdateStatus"
+        :status-message="selfUpdateStatusMsg"
+        @close="closeSelfUpdateModal()"
+        @reload="reloadAfterSelfUpdate()"
+      />
       <DiskDetailModal
         :open="diskModalOpen"
         :disk="selectedDisk"
@@ -555,6 +564,7 @@ import AboutView from './components/AboutView.vue'
 import CustomLinkModal from './components/CustomLinkModal.vue'
 import HealthStatusModal from './components/HealthStatusModal.vue'
 import SystemUpdateModal from './components/SystemUpdateModal.vue'
+import AppSelfUpdateModal from './components/AppSelfUpdateModal.vue'
 import LinkedNodesModal from './components/LinkedNodesModal.vue'
 import ProfileModal from './components/ProfileModal.vue'
 import ContainerLogsModal from './components/ContainerLogsModal.vue'
@@ -956,30 +966,115 @@ async function fetchAppUpdateStatus(force = false) {
   } catch {}
 }
 
+const selfUpdateModalOpen = ref(false)
+const selfUpdateTarget = ref('')
+const selfUpdateLog = ref('')
+const selfUpdateStatus = ref('running')
+const selfUpdateStatusMsg = ref('Atualizando em tempo real...')
+let selfUpdatePollTimer = null
+
+function reloadAfterSelfUpdate() {
+  window.location.reload()
+}
+
+function closeSelfUpdateModal() {
+  if (selfUpdateStatus.value === 'running' || selfUpdateStatus.value === 'restarting') return
+  selfUpdateModalOpen.value = false
+  if (selfUpdatePollTimer) {
+    clearInterval(selfUpdatePollTimer)
+    selfUpdatePollTimer = null
+  }
+}
+
 async function triggerAppSelfUpdate() {
   if (appUpdating.value) return
   appUpdating.value = true
+  const expectedVer = appUpdateInfo.value?.latest_version || ''
+  selfUpdateTarget.value = expectedVer
+  selfUpdateLog.value = `:: Preparando atualização para v${expectedVer || 'nova versão'}...\n`
+  selfUpdateStatus.value = 'running'
+  selfUpdateStatusMsg.value = 'Baixando e aplicando atualização...'
+  healthModalOpen.value = false
+  selfUpdateModalOpen.value = true
   appUpdateMsg.value = 'Baixando e aplicando nova versão do repositório...'
+
   try {
     const res = await fetch('/api/proxmenux/self-update', { method: 'POST' })
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      appUpdateMsg.value = data.detail || 'Falha ao iniciar atualização.'
+      selfUpdateStatus.value = 'error'
+      selfUpdateStatusMsg.value = data.detail || 'Falha ao iniciar atualização.'
+      selfUpdateLog.value += `\n✗ ${selfUpdateStatusMsg.value}\n`
+      appUpdateMsg.value = selfUpdateStatusMsg.value
       appUpdating.value = false
       return
     }
-    appUpdateMsg.value = data.message || 'Atualização iniciada. Aguardando reinício do serviço...'
-    const poll = setInterval(async () => {
+
+    if (data.target_version) selfUpdateTarget.value = data.target_version
+    const target = selfUpdateTarget.value
+    let sawRestart = false
+    let ticks = 0
+
+    if (selfUpdatePollTimer) clearInterval(selfUpdatePollTimer)
+    selfUpdatePollTimer = setInterval(async () => {
+      ticks += 1
+      if (ticks > 150) {
+        clearInterval(selfUpdatePollTimer)
+        selfUpdatePollTimer = null
+        selfUpdateStatus.value = 'error'
+        selfUpdateStatusMsg.value = 'Tempo limite excedido aguardando conclusão.'
+        appUpdating.value = false
+        return
+      }
       try {
-        const ping = await fetch('/api/auth/status')
-        if (ping.ok) {
-          clearInterval(poll)
-          window.location.reload()
+        const logRes = await fetch('/api/proxmenux/self-update/log')
+        if (!logRes.ok) throw new Error('restarting')
+        const d = await logRes.json()
+        if (d.log) selfUpdateLog.value = d.log
+
+        if (d.failed) {
+          clearInterval(selfUpdatePollTimer)
+          selfUpdatePollTimer = null
+          selfUpdateStatus.value = 'error'
+          selfUpdateStatusMsg.value = 'Falha durante a execução do instalador.'
+          appUpdating.value = false
+          return
         }
-      } catch {}
-    }, 3000)
+
+        const versionMatched = target && d.current_version === target
+        if (d.done && (versionMatched || sawRestart || !d.running)) {
+          clearInterval(selfUpdatePollTimer)
+          selfUpdatePollTimer = null
+          selfUpdateStatus.value = 'done'
+          selfUpdateStatusMsg.value = `Atualizado para v${d.current_version || target}! Recarregando...`
+          appUpdating.value = false
+          setTimeout(() => window.location.reload(), 1500)
+          return
+        }
+
+        if (sawRestart && versionMatched) {
+          clearInterval(selfUpdatePollTimer)
+          selfUpdatePollTimer = null
+          selfUpdateStatus.value = 'done'
+          selfUpdateStatusMsg.value = `Atualizado para v${d.current_version}! Recarregando...`
+          appUpdating.value = false
+          setTimeout(() => window.location.reload(), 1500)
+          return
+        }
+
+        selfUpdateStatus.value = 'running'
+        selfUpdateStatusMsg.value = 'Executando instalador e aplicando arquivos...'
+      } catch {
+        sawRestart = true
+        selfUpdateStatus.value = 'restarting'
+        selfUpdateStatusMsg.value = 'Reiniciando serviço linuxmenux.service...'
+      }
+    }, 1200)
   } catch (e) {
-    appUpdateMsg.value = 'Erro de conexão ao atualizar.'
+    selfUpdateStatus.value = 'error'
+    selfUpdateStatusMsg.value = 'Erro de conexão ao iniciar atualização.'
+    selfUpdateLog.value += '\n✗ Erro de conexão ao iniciar atualização.\n'
+    appUpdateMsg.value = selfUpdateStatusMsg.value
     appUpdating.value = false
   }
 }

@@ -704,39 +704,88 @@ def get_security_overview() -> Dict[str, Any]:
     f2b_bin = shutil.which("fail2ban-client")
     f2b_installed = bool(f2b_bin)
     f2b_running = False
+    f2b_version = ""
     f2b_jails: List[str] = []
     f2b_jail_details: List[Dict[str, Any]] = []
     f2b_currently_banned = 0
     f2b_total_banned = 0
+    f2b_total_failed = 0
     if f2b_bin:
+        vp = _run_cmd([f2b_bin, "--version"], timeout=4)
+        if vp.returncode == 0 and vp.stdout.strip():
+            vm = re.search(r"(\d+\.\d+\.\d+)", vp.stdout)
+            f2b_version = f"v{vm.group(1)}" if vm else vp.stdout.strip().splitlines()[0]
         fp = _run_cmd([f2b_bin, "status"], timeout=5)
         if fp.returncode == 0:
             f2b_running = True
             m = re.search(r"Jail list:\s*(.+)", fp.stdout)
             if m:
                 f2b_jails = [j.strip() for j in m.group(1).split(",") if j.strip()]
+            jail_meta = {
+                "sshd": ("SSH", "Bloqueia falhas repetidas de login SSH."),
+                "linuxmenux": ("Linux Menux Monitor", "Bloqueia falhas repetidas de login do Monitor."),
+                "nginx-http-auth": ("Nginx Auth", "Bloqueia falhas repetidas de autenticação HTTP."),
+                "caddy": ("Caddy Proxy", "Protege endpoints atrás do proxy reverso."),
+            }
             for jname in f2b_jails:
                 jp = _run_cmd([f2b_bin, "status", jname], timeout=5)
                 cur_b = 0
                 tot_b = 0
+                cur_f = 0
+                tot_f = 0
                 ips: List[str] = []
                 if jp.returncode == 0:
                     mc = re.search(r"Currently banned:\s*(\d+)", jp.stdout)
                     mt = re.search(r"Total banned:\s*(\d+)", jp.stdout)
+                    mcf = re.search(r"Currently failed:\s*(\d+)", jp.stdout)
+                    mtf = re.search(r"Total failed:\s*(\d+)", jp.stdout)
                     mi = re.search(r"Banned IP list:\s*(.+)", jp.stdout)
                     if mc:
                         cur_b = int(mc.group(1))
                     if mt:
                         tot_b = int(mt.group(1))
+                    if mcf:
+                        cur_f = int(mcf.group(1))
+                    if mtf:
+                        tot_f = int(mtf.group(1))
                     if mi:
                         ips = [x.strip() for x in mi.group(1).split() if x.strip()]
+
+                def _get_f2b_val(key: str, default: str) -> str:
+                    rp = _run_cmd([f2b_bin, "get", jname, key], timeout=3)
+                    return rp.stdout.strip().splitlines()[-1] if rp.returncode == 0 and rp.stdout.strip() else default
+
+                maxretry = _get_f2b_val("maxretry", "3")
+                bantime_raw = _get_f2b_val("bantime", "3600")
+                findtime_raw = _get_f2b_val("findtime", "600")
+
+                def _fmt_duration(val: str) -> str:
+                    try:
+                        sec = int(val)
+                        if sec >= 3600 and sec % 3600 == 0:
+                            return f"{sec // 3600}h"
+                        if sec >= 60 and sec % 60 == 0:
+                            return f"{sec // 60}m"
+                        return f"{sec}s"
+                    except Exception:
+                        return val
+
+                label, desc = jail_meta.get(jname, (jname.upper(), f"Proteção automática para o serviço {jname}."))
                 f2b_currently_banned += cur_b
                 f2b_total_banned += tot_b
+                f2b_total_failed += tot_f
                 f2b_jail_details.append({
                     "name": jname,
+                    "label": label,
+                    "description": desc,
                     "currently_banned": cur_b,
                     "total_banned": tot_b,
+                    "currently_failed": cur_f,
+                    "total_failed": tot_f,
                     "banned_ips": ips,
+                    "maxretry": maxretry,
+                    "bantime": _fmt_duration(bantime_raw),
+                    "findtime": _fmt_duration(findtime_raw),
                 })
 
     # Lynis
@@ -753,10 +802,12 @@ def get_security_overview() -> Dict[str, Any]:
         "fail2ban": {
             "installed": f2b_installed,
             "running": f2b_running,
+            "version": f2b_version,
             "jails": f2b_jails,
             "jail_details": f2b_jail_details,
             "currently_banned": f2b_currently_banned,
             "total_banned": f2b_total_banned,
+            "total_failed": f2b_total_failed,
         },
         "lynis": {"installed": lynis_installed, "reports": lynis_reports},
         "api_tokens": tokens,

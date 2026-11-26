@@ -468,78 +468,350 @@
         </div>
       </div>
 
-      <!-- 6. Fail2Ban Completo -->
-      <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
-        <div class="flex items-center justify-between gap-4 flex-wrap">
-          <div class="flex items-start gap-3">
-            <ShieldAlert class="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
+      <!-- 6. Fail2Ban Completo (1:1 ProxMenux Monitor, zero fundo preto) -->
+      <div class="bg-[var(--card)] border border-zinc-700/60 rounded-xl p-5 sm:p-6 space-y-4">
+        <!-- Cabeçalho -->
+        <div class="flex items-start justify-between gap-4 flex-wrap">
+          <div class="flex items-start gap-2.5">
+            <Bug class="w-5 h-5 text-red-400 mt-0.5 shrink-0" />
             <div>
-              <h3 class="text-base font-semibold text-white flex items-center gap-2">
-                Fail2Ban
-                <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold border"
-                  :class="securityData.fail2ban?.installed ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-zinc-800 text-zinc-400 border-zinc-700'">
-                  {{ securityData.fail2ban?.installed ? 'Instalado' : 'Não instalado' }}
-                </span>
-              </h3>
-              <p class="text-xs text-zinc-400 mt-0.5">Bloqueio automático de IPs com múltiplas falhas de autenticação SSH e serviços.</p>
+              <h3 class="text-base font-semibold text-white">Fail2Ban</h3>
+              <p class="text-xs text-zinc-400 mt-0.5">Bloqueie tentativas repetidas de login com falha no SSH e no Monitor.</p>
             </div>
           </div>
-          <button v-if="!securityData.fail2ban?.installed" @click="$emit('install-tool', 'fail2ban')" :disabled="secInstalling === 'fail2ban'"
-            class="bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs px-4 py-1.5 rounded-lg font-semibold cursor-pointer">
-            {{ secInstalling === 'fail2ban' ? 'Instalando...' : 'Instalar e Configurar' }}
+          <div class="flex items-center gap-2 shrink-0">
+            <button
+              @click="refreshFail2ban"
+              :disabled="f2bRefreshing"
+              class="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': f2bRefreshing }" />
+              Atualizar
+            </button>
+            <button
+              v-if="securityData.fail2ban?.installed"
+              @click="showF2bUninstallConfirm = true"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-medium cursor-pointer transition"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+              Desinstalar
+            </button>
+            <button
+              v-else
+              @click="showF2bInstallModal = true"
+              :disabled="secInstalling === 'fail2ban'"
+              class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white text-xs font-semibold cursor-pointer transition"
+            >
+              {{ secInstalling === 'fail2ban' ? 'Instalando...' : 'Instalar e Configurar' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Card de Status do Serviço -->
+        <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-white/[0.025] border border-zinc-700/60">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-9 h-9 rounded-full bg-white/[0.04] border border-zinc-700/60 flex items-center justify-center shrink-0">
+              <Bug class="w-4 h-4" :class="securityData.fail2ban?.running ? 'text-emerald-400' : 'text-zinc-400'" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-medium text-white truncate">
+                Fail2Ban {{ securityData.fail2ban?.version || '' }}
+              </div>
+              <div class="text-xs text-zinc-400">
+                {{ securityData.fail2ban?.running ? 'Serviço em execução' : (securityData.fail2ban?.installed ? 'Serviço parado' : 'Não instalado neste sistema') }}
+              </div>
+            </div>
+          </div>
+          <span
+            class="px-3 py-1 rounded-md border text-xs font-medium shrink-0"
+            :class="securityData.fail2ban?.running
+              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-400'
+              : 'bg-white/[0.03] border-zinc-700/60 text-zinc-400'"
+          >
+            {{ securityData.fail2ban?.running ? 'Ativo' : (securityData.fail2ban?.installed ? 'Inativo' : 'Desativado') }}
+          </span>
+        </div>
+
+        <!-- Endereços IP e redes confiáveis (1:1 ProxMenux, sem fundo preto) -->
+        <div class="rounded-lg bg-white/[0.02] border border-zinc-700/60 overflow-hidden">
+          <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-800/80 flex-wrap">
+            <div class="flex items-center gap-2.5 min-w-0">
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center shrink-0">
+                <Globe class="w-4 h-4 text-emerald-400" />
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-white">Endereços IP e redes confiáveis</div>
+                <div class="text-xs text-zinc-400">Fail2Ban nunca bloqueará esses endereços.</div>
+              </div>
+            </div>
+            <button
+              @click="showAddTrustedModal = true"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 text-xs font-medium cursor-pointer transition shrink-0"
+            >
+              <Plus class="w-3.5 h-3.5" />
+              Adicionar endereço/rede
+            </button>
+          </div>
+
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+              <thead class="border-b border-zinc-800/80 text-zinc-500 uppercase tracking-wider text-[11px]">
+                <tr>
+                  <th class="px-4 py-2.5 font-medium">STATUS</th>
+                  <th class="px-4 py-2.5 font-medium">TIPO</th>
+                  <th class="px-4 py-2.5 font-medium">ENDEREÇO/REDE</th>
+                  <th class="px-4 py-2.5 font-medium text-right">AÇÕES</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-zinc-800/60">
+                <tr>
+                  <td class="px-4 py-2.5">
+                    <span class="px-2 py-0.5 rounded bg-white/[0.05] border border-zinc-700/60 text-zinc-300 font-medium text-[11px]">SISTEMA</span>
+                  </td>
+                  <td class="px-4 py-2.5">
+                    <span class="px-2 py-0.5 rounded bg-purple-500/15 border border-purple-500/30 text-purple-300 font-mono text-[11px]">CIDR</span>
+                  </td>
+                  <td class="px-4 py-2.5 font-mono text-zinc-200">127.0.0.0/8</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">
+                    <span class="inline-flex items-center gap-1"><Lock class="w-3 h-3" /> Obrigatório</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5">
+                    <span class="px-2 py-0.5 rounded bg-white/[0.05] border border-zinc-700/60 text-zinc-300 font-medium text-[11px]">SISTEMA</span>
+                  </td>
+                  <td class="px-4 py-2.5">
+                    <span class="px-2 py-0.5 rounded bg-blue-500/15 border border-blue-500/30 text-blue-300 font-mono text-[11px]">IP</span>
+                  </td>
+                  <td class="px-4 py-2.5 font-mono text-zinc-200">::1</td>
+                  <td class="px-4 py-2.5 text-right text-zinc-500">
+                    <span class="inline-flex items-center gap-1"><Lock class="w-3 h-3" /> Obrigatório</span>
+                  </td>
+                </tr>
+                <tr v-for="ip in trustedIps" :key="ip">
+                  <td class="px-4 py-2.5">
+                    <span class="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-medium text-[11px]">CUSTOM</span>
+                  </td>
+                  <td class="px-4 py-2.5">
+                    <span class="px-2 py-0.5 rounded bg-white/[0.05] border border-zinc-700/60 text-zinc-300 font-mono text-[11px]">{{ ip.includes('/') ? 'CIDR' : 'IP' }}</span>
+                  </td>
+                  <td class="px-4 py-2.5 font-mono text-zinc-200">{{ ip }}</td>
+                  <td class="px-4 py-2.5 text-right">
+                    <button @click="removeTrustedIp(ip)" class="text-red-400 hover:text-red-300 cursor-pointer font-medium">Remover</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="px-4 py-2.5 bg-amber-500/[0.06] border-t border-amber-500/20 text-xs text-amber-300/90 flex items-center gap-2">
+            <AlertTriangle class="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Confie apenas nos endereços que você controla. Se você confiar em uma rede inteira, o Fail2Ban também ignorará um dispositivo comprometido nessa rede.</span>
+          </div>
+        </div>
+
+        <!-- 4 Cards de KPI (1:1 ProxMenux) -->
+        <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 text-center">
+          <div class="bg-white/[0.025] border border-zinc-700/60 rounded-lg py-3.5 px-3">
+            <div class="text-xl font-bold text-white">{{ (securityData.fail2ban?.jails || []).length }}</div>
+            <div class="text-[11px] uppercase tracking-wider text-zinc-400 mt-1">PROTEÇÕES</div>
+          </div>
+          <div class="bg-white/[0.025] border border-zinc-700/60 rounded-lg py-3.5 px-3">
+            <div class="text-xl font-bold text-white">{{ securityData.fail2ban?.currently_banned || 0 }}</div>
+            <div class="text-[11px] uppercase tracking-wider text-zinc-400 mt-1">IPS BLOQUEADOS</div>
+          </div>
+          <div class="bg-orange-500/[0.06] border border-orange-500/25 rounded-lg py-3.5 px-3">
+            <div class="text-xl font-bold text-orange-400">{{ securityData.fail2ban?.total_banned || 0 }}</div>
+            <div class="text-[11px] uppercase tracking-wider text-orange-400/80 mt-1">TOTAL DE BLOCOS</div>
+          </div>
+          <div class="bg-amber-500/[0.06] border border-amber-500/25 rounded-lg py-3.5 px-3">
+            <div class="text-xl font-bold text-amber-400">{{ securityData.fail2ban?.total_failed || 0 }}</div>
+            <div class="text-[11px] uppercase tracking-wider text-amber-400/80 mt-1">TENTATIVAS FALHADAS</div>
+          </div>
+        </div>
+
+        <!-- Abas Proteções / Atividade (1:1 ProxMenux) -->
+        <div class="grid grid-cols-2 rounded-lg overflow-hidden border border-zinc-700/60 bg-white/[0.02] text-xs font-medium">
+          <button
+            @click="f2bActiveTab = 'jails'"
+            class="flex items-center justify-center gap-2 py-2.5 px-3 cursor-pointer transition"
+            :class="f2bActiveTab === 'jails' ? 'bg-red-500 text-white font-semibold' : 'text-zinc-400 hover:text-white'"
+          >
+            <Shield class="w-3.5 h-3.5" />
+            Proteções e IPs bloqueados
+          </button>
+          <button
+            @click="loadFail2banActivity()"
+            class="flex items-center justify-center gap-2 py-2.5 px-3 cursor-pointer transition"
+            :class="f2bActiveTab === 'activity' ? 'bg-red-500 text-white font-semibold' : 'text-zinc-400 hover:text-white'"
+          >
+            <Clock class="w-3.5 h-3.5" />
+            Atividade
           </button>
         </div>
 
-        <div v-if="!securityData.fail2ban?.installed" class="p-4 rounded-xl bg-blue-950/30 border border-blue-800/40 text-xs text-blue-200 space-y-1.5">
-          <div class="font-semibold text-blue-300">O instalador irá configurar automaticamente:</div>
-          <ul class="list-disc list-inside text-zinc-300 space-y-0.5">
-            <li>Proteção SSH (sshd) contra força bruta</li>
-            <li>Monitoramento de proteção de login do painel</li>
-            <li>Configurações básicas de banimento e whitelist</li>
-          </ul>
-        </div>
+        <!-- Conteúdo Aba: Proteções e IPs bloqueados -->
+        <div v-if="f2bActiveTab === 'jails'" class="space-y-3 text-xs">
+          <div
+            v-if="!(securityData.fail2ban?.jail_details || []).length"
+            class="border border-dashed border-zinc-700/70 rounded-lg py-8 px-4 text-center bg-white/[0.015] text-zinc-400"
+          >
+            {{ securityData.fail2ban?.installed ? 'Nenhum jail ativo encontrado no Fail2Ban.' : 'Instale o Fail2Ban para ativar as proteções automáticas (SSH e Monitor).' }}
+          </div>
 
-        <div class="grid grid-cols-3 gap-3 text-center">
-          <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3">
-            <div class="text-lg font-bold text-white">{{ (securityData.fail2ban?.jails || []).length }}</div>
-            <div class="text-xs text-zinc-400">Jails Ativos</div>
-          </div>
-          <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3">
-            <div class="text-lg font-bold text-amber-400">{{ securityData.fail2ban?.currently_banned || 0 }}</div>
-            <div class="text-xs text-zinc-400">IPs Banidos Agora</div>
-          </div>
-          <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3">
-            <div class="text-lg font-bold text-red-400">{{ securityData.fail2ban?.total_banned || 0 }}</div>
-            <div class="text-xs text-zinc-400">Total Banido</div>
-          </div>
-        </div>
-
-        <div v-if="(securityData.fail2ban?.jail_details || []).length" class="space-y-2 text-xs">
-          <div v-for="j in securityData.fail2ban.jail_details" :key="j.name" class="p-3 rounded-lg bg-zinc-950/70 border border-zinc-800 space-y-2">
-            <div class="flex items-center justify-between">
-              <span class="font-bold text-white">Jail: <span class="font-mono text-orange-400">{{ j.name }}</span></span>
-              <span class="text-zinc-400">Banidos agora: <strong class="text-amber-400">{{ j.currently_banned }}</strong> · Total: <strong class="text-red-400">{{ j.total_banned }}</strong></span>
+          <div
+            v-for="j in (securityData.fail2ban?.jail_details || [])"
+            :key="j.name"
+            class="rounded-lg bg-white/[0.025] border border-zinc-700/60 overflow-hidden"
+          >
+            <div class="flex items-center justify-between gap-3 px-4 py-3 border-b border-zinc-800/70 flex-wrap">
+              <div class="flex items-center gap-2 flex-wrap min-w-0">
+                <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
+                <span class="font-semibold text-white">{{ j.label || j.name }}</span>
+                <span class="font-mono text-zinc-400">{{ j.name }}</span>
+                <span class="text-zinc-400 truncate">{{ j.description }}</span>
+              </div>
+              <div class="flex items-center gap-3 text-zinc-400 shrink-0 flex-wrap">
+                <span>Limite de tentativas: <strong class="text-white">{{ j.maxretry || 3 }}</strong></span>
+                <span>Tempo de bloqueio: <strong class="text-white">{{ j.bantime || '1h' }}</strong></span>
+                <span>Período: <strong class="text-white">{{ j.findtime || '10m' }}</strong></span>
+              </div>
             </div>
-            <div v-if="(j.banned_ips || []).length" class="flex flex-wrap gap-1.5">
-              <span v-for="bip in j.banned_ips" :key="bip" class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-red-500/15 border border-red-500/30 font-mono text-red-300">
-                {{ bip }}
-                <button @click="unbanFail2banIp(j.name, bip)" class="text-white hover:text-emerald-300 font-sans cursor-pointer">Desbanir</button>
-              </span>
+
+            <div class="flex items-center gap-5 px-4 py-2.5 border-b border-zinc-800/70 flex-wrap text-zinc-400">
+              <span>Atualmente bloqueado: <strong class="text-emerald-400">{{ j.currently_banned || 0 }}</strong></span>
+              <span>Total de blocos: <strong class="text-orange-400">{{ j.total_banned || 0 }}</strong></span>
+              <span>Falha agora: <strong class="text-amber-400">{{ j.currently_failed || 0 }}</strong></span>
+              <span>Falha total: <strong class="text-zinc-200">{{ j.total_failed || 0 }}</strong></span>
+            </div>
+
+            <div class="px-4 py-3">
+              <div v-if="(j.banned_ips || []).length" class="flex flex-wrap gap-1.5">
+                <span
+                  v-for="bip in j.banned_ips"
+                  :key="bip"
+                  class="inline-flex items-center gap-2 px-2.5 py-1 rounded-md bg-red-500/10 border border-red-500/30 font-mono text-red-300"
+                >
+                  {{ bip }}
+                  <button @click="unbanFail2banIp(j.name, bip)" class="text-white hover:text-emerald-300 font-sans font-medium cursor-pointer">Desbanir</button>
+                </span>
+              </div>
+              <div v-else class="text-center text-zinc-500 py-0.5">
+                Nenhum endereço IP está bloqueado no momento.
+              </div>
             </div>
           </div>
         </div>
 
-        <div class="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3.5 space-y-2.5 text-xs">
-          <div class="font-semibold text-zinc-200">Redes Confiáveis (Whitelist / ignoreip)</div>
-          <div class="flex gap-2">
-            <input v-model="f2bTrustedInput" type="text" placeholder="Ex: 192.168.16.0/24 ou 10.0.0.5" class="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-white font-mono" />
-            <button @click="addTrustedIp" class="px-3 py-1.5 rounded-md bg-orange-600 hover:bg-orange-500 text-white font-semibold cursor-pointer">+ Adicionar IP</button>
+        <!-- Conteúdo Aba: Atividade -->
+        <div v-else class="rounded-lg bg-white/[0.02] border border-zinc-700/60 overflow-hidden text-xs">
+          <div v-if="f2bActivityLoading" class="py-8 text-center text-zinc-400">Carregando atividade recente...</div>
+          <div v-else-if="!f2bActivity.length" class="py-8 text-center text-zinc-500">Nenhum evento recente registrado nos logs do Fail2Ban.</div>
+          <div v-else class="max-h-64 overflow-y-auto divide-y divide-zinc-800/70">
+            <div v-for="(ev, i) in f2bActivity" :key="i" class="flex items-center justify-between gap-3 px-4 py-2.5">
+              <div class="flex items-center gap-2.5 min-w-0">
+                <span
+                  class="px-2 py-0.5 rounded font-semibold uppercase text-[11px] border shrink-0"
+                  :class="ev.action === 'Ban' ? 'bg-red-500/10 border-red-500/30 text-red-400' : (ev.action === 'Unban' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')"
+                >
+                  {{ ev.action }}
+                </span>
+                <span class="font-mono text-zinc-200">{{ ev.ip }}</span>
+                <span class="text-zinc-500 font-mono">[{{ ev.jail }}]</span>
+              </div>
+              <span class="text-zinc-500 font-mono shrink-0">{{ ev.timestamp }}</span>
+            </div>
           </div>
-          <div v-if="trustedIps.length" class="flex flex-wrap gap-1.5 pt-1">
-            <span v-for="ip in trustedIps" :key="ip" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-zinc-900 border border-zinc-700 font-mono text-zinc-200">
-              {{ ip }}
-              <button @click="removeTrustedIp(ip)" class="text-red-400 hover:text-red-300 cursor-pointer">×</button>
-            </span>
+        </div>
+      </div>
+
+      <!-- Modal Adicionar IP / Rede Confiável -->
+      <div
+        v-if="showAddTrustedModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        @click.self="showAddTrustedModal = false"
+      >
+        <div class="w-full max-w-md bg-[var(--card)] border border-zinc-700/80 rounded-xl p-5 space-y-4 shadow-2xl">
+          <div class="flex items-center justify-between">
+            <h4 class="text-sm font-semibold text-white">Adicionar endereço/rede confiável</h4>
+            <button @click="showAddTrustedModal = false" class="text-zinc-400 hover:text-white cursor-pointer"><X class="w-4 h-4" /></button>
+          </div>
+          <div class="space-y-2 text-xs">
+            <label class="block text-zinc-400">IPv4, IPv6 ou CIDR</label>
+            <input
+              v-model="f2bTrustedInput"
+              type="text"
+              placeholder="Ex: 192.168.16.0/24 ou 100.64.0.10"
+              class="w-full bg-white/[0.04] border border-zinc-700 rounded-lg px-3 py-2 text-white font-mono placeholder-zinc-500 focus:outline-none focus:border-orange-500/60"
+            />
+          </div>
+          <div class="flex justify-end gap-2 pt-2 border-t border-zinc-800/80 text-xs">
+            <button @click="showAddTrustedModal = false" class="px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-white/[0.04] cursor-pointer">Cancelar</button>
+            <button @click="addTrustedIp" class="px-4 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-white font-semibold cursor-pointer">Adicionar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Confirmação Instalação Fail2Ban (1:1 Imagem 3 ProxMenux) -->
+      <div
+        v-if="showF2bInstallModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        @click.self="showF2bInstallModal = false"
+      >
+        <div class="w-full max-w-lg bg-[var(--card)] border border-zinc-700/80 rounded-xl p-6 space-y-4 shadow-2xl">
+          <h4 class="text-base font-bold text-white">Instale Fail2Ban</h4>
+          <p class="text-xs text-zinc-300">Fail2Ban não está instalado neste sistema.</p>
+          <div class="text-xs text-zinc-300 space-y-1.5">
+            <div class="font-medium text-zinc-200">Isto irá instalar e configurar o Fail2Ban com:</div>
+            <ul class="space-y-1 text-zinc-300 pl-1">
+              <li>- Proteção SSH (modo agressivo) (max 2 novas tentativas, 9h proibir)</li>
+              <li>- Proteção do Linux Menux - Monitor (porta 8008 + proxy reverso, max 3 novas tentativas, 1h proibir)</li>
+              <li>- Back-end de firewall detectado automaticamente (nftables/iptables)</li>
+              <li>- Ajusta o nível de log do diário, se necessário, para captura de logs de autenticação</li>
+              <li>- Proteção SSH: MaxAuthTries definido como 3 (recomendação Lynis)</li>
+            </ul>
+          </div>
+          <p class="text-xs text-zinc-300 pt-1">Você quer prosseguir?</p>
+          <div class="grid grid-cols-2 gap-3 pt-1">
+            <button
+              @click="confirmInstallFail2ban"
+              class="py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer transition"
+            >
+              Sim
+            </button>
+            <button
+              @click="showF2bInstallModal = false"
+              class="py-2 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] border border-zinc-700 text-zinc-200 text-xs font-medium cursor-pointer transition"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal Confirmação Desinstalação Fail2Ban -->
+      <div
+        v-if="showF2bUninstallConfirm"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        @click.self="showF2bUninstallConfirm = false"
+      >
+        <div class="w-full max-w-md bg-[var(--card)] border border-zinc-700/80 rounded-xl p-5 space-y-4 shadow-2xl">
+          <h4 class="text-sm font-semibold text-white">Desinstalar Fail2Ban</h4>
+          <p class="text-xs text-zinc-300">Deseja realmente parar o serviço e remover o Fail2Ban deste host?</p>
+          <div class="grid grid-cols-2 gap-3 pt-1 text-xs">
+            <button
+              @click="uninstallFail2ban"
+              :disabled="f2bUninstalling"
+              class="py-2 rounded-lg bg-red-600 hover:bg-red-500 disabled:opacity-50 text-white font-semibold cursor-pointer"
+            >
+              {{ f2bUninstalling ? 'Desinstalando...' : 'Confirmar' }}
+            </button>
+            <button
+              @click="showF2bUninstallConfirm = false"
+              class="py-2 rounded-lg bg-white/[0.05] hover:bg-white/[0.08] border border-zinc-700 text-zinc-200 font-medium cursor-pointer"
+            >
+              Cancelar
+            </button>
           </div>
         </div>
       </div>
@@ -599,7 +871,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Lock, Key, Eye, EyeOff, ShieldCheck, Shield, ShieldAlert, Globe, FileSearch, Copy, Flame, RefreshCw, Power, Info, Plus, Trash2, X } from 'lucide-vue-next'
+import { Lock, Key, Eye, EyeOff, ShieldCheck, Shield, ShieldAlert, Globe, FileSearch, Copy, Flame, RefreshCw, Power, Info, Plus, Trash2, X, Bug, AlertTriangle, Clock } from 'lucide-vue-next'
 import { fetchApi, setAuthToken } from '../lib/api-config'
 
 const props = defineProps({
@@ -639,6 +911,14 @@ const fwNotice = ref('')
 const fwNoticeError = ref(false)
 const f2bTrustedInput = ref('')
 const trustedIps = ref([])
+const f2bActiveTab = ref('jails')
+const f2bRefreshing = ref(false)
+const showAddTrustedModal = ref(false)
+const showF2bInstallModal = ref(false)
+const showF2bUninstallConfirm = ref(false)
+const f2bUninstalling = ref(false)
+const f2bActivity = ref([])
+const f2bActivityLoading = ref(false)
 
 const firewallEngineName = computed(() => {
   const eng = props.securityData?.firewall?.engine
@@ -815,6 +1095,48 @@ async function deleteFwRule(number) {
   emit('refresh-security')
 }
 
+async function refreshFail2ban() {
+  f2bRefreshing.value = true
+  try {
+    emit('refresh-security')
+    if (f2bActiveTab.value === 'activity') {
+      await loadFail2banActivity()
+    }
+  } finally {
+    setTimeout(() => { f2bRefreshing.value = false }, 400)
+  }
+}
+
+async function loadFail2banActivity() {
+  f2bActiveTab.value = 'activity'
+  f2bActivityLoading.value = true
+  try {
+    const res = await fetchApi('/api/security/fail2ban/activity')
+    if (res.ok) {
+      const d = await res.json()
+      f2bActivity.value = d.events || []
+    }
+  } finally {
+    f2bActivityLoading.value = false
+  }
+}
+
+function confirmInstallFail2ban() {
+  showF2bInstallModal.value = false
+  emit('install-tool', 'fail2ban')
+}
+
+async function uninstallFail2ban() {
+  f2bUninstalling.value = true
+  try {
+    await fetchApi('/api/security/fail2ban/uninstall', { method: 'POST' })
+    showF2bUninstallConfirm.value = false
+    emit('refresh-security')
+  } finally {
+    f2bUninstalling.value = false
+  }
+}
+
 async function addTrustedIp() {
   const ip = f2bTrustedInput.value.trim()
   if (!ip) return
@@ -827,6 +1149,7 @@ async function addTrustedIp() {
     const d = await res.json()
     trustedIps.value = d.trusted_ips || []
     f2bTrustedInput.value = ''
+    showAddTrustedModal.value = false
   }
 }
 
