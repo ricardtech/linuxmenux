@@ -2,6 +2,17 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.11] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **26.327 linhas** de código em **93 arquivos-fonte** (`8.777` `.vue` · `7.005` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
+### Alterado
+- **Firewall idêntico ao ProxMenux Monitor (`SecurityView.vue`)**: redesign completo do card de Firewall sem fundo preto (`bg-zinc-950`), utilizando a paleta grafite neutra (`var(--card)` + `bg-white/[0.025]`), com 2 cards de status no topo, banner informativo azul, 2 cards de regras de acesso rápido, contador dinâmico de regras, botão `+ Adicionar regra` com modal dedicado e estado vazio com borda tracejada.
+
+### Adicionado
+- **Detecção inteligente multi-motor de Firewall (`linux_ops.py` & `main.py`)**: `_inspect_firewall_smart()` identifica automaticamente todos os motores instalados (`UFW`, `firewalld`, `nftables`, `iptables`), o motor ativo/pronto, política padrão e regras estruturadas (`parsed_rules`), além de suporte multi-motor para habilitar/desabilitar e remover regras.
+
 ## [1.3.10] - 26/11/2026
 
 ### 📊 Métricas de Código

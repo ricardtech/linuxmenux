@@ -182,86 +182,289 @@
     <div class="space-y-4 pt-2">
       <h2 class="text-sm font-semibold uppercase tracking-wider text-orange-400">Sistema Linux</h2>
 
-      <!-- 5. Firewall Completo -->
-      <div class="bg-[var(--card)] border border-zinc-800/90 rounded-xl p-5 sm:p-6 space-y-4">
-        <div class="flex items-center justify-between gap-4 flex-wrap">
-          <div class="flex items-start gap-3">
-            <Shield class="w-5 h-5 text-orange-400 mt-0.5 shrink-0" />
+      <!-- 5. Firewall Completo (1:1 ProxMenux Monitor) -->
+      <div class="bg-[var(--card)] border border-zinc-700/60 rounded-xl p-5 sm:p-6 space-y-4">
+        <!-- Cabeçalho -->
+        <div class="flex items-start justify-between gap-4">
+          <div class="flex items-start gap-2.5">
+            <Flame class="w-5 h-5 text-orange-400 mt-0.5 shrink-0" />
             <div>
-              <h3 class="text-base font-semibold text-white flex items-center gap-2">
-                Firewall ({{ securityData.firewall?.engine || 'UFW / iptables' }})
-                <span class="text-xs px-2.5 py-0.5 rounded-full font-semibold border"
-                  :class="securityData.firewall?.active ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-amber-500/15 text-amber-400 border-amber-500/30'">
-                  {{ securityData.firewall?.active ? 'Ativo' : 'Inativo' }}
-                </span>
-              </h3>
-              <p class="text-xs text-zinc-400 mt-0.5">Gerencie regras de entrada e saída do host diretamente pela interface web.</p>
+              <h3 class="text-base font-semibold text-white">Firewall</h3>
+              <p class="text-xs text-zinc-400 mt-0.5">Gerencie o estado do firewall do host e regras de acesso simples.</p>
             </div>
           </div>
-          <div class="flex items-center gap-2">
-            <button @click="toggleFirewall(!securityData.firewall?.active)" class="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-xs text-zinc-200 font-medium cursor-pointer">
-              {{ securityData.firewall?.active ? 'Desativar Firewall' : 'Ativar Firewall' }}
+          <button
+            @click="refreshFirewall"
+            :disabled="fwRefreshing"
+            class="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition cursor-pointer shrink-0 disabled:opacity-50"
+          >
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': fwRefreshing }" />
+            Atualizar
+          </button>
+        </div>
+
+        <!-- Cards de Status do Motor & Host (2 colunas idênticas ao ProxMenux, sem fundo preto) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <!-- Card 1: Motor detectado -->
+          <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-white/[0.025] border border-zinc-700/60">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-8 h-8 rounded-full bg-white/[0.04] border border-zinc-700/60 flex items-center justify-center shrink-0">
+                <Globe class="w-4 h-4 text-zinc-400" />
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-white truncate">
+                  Motor: {{ firewallEngineName }}
+                </div>
+                <div class="text-xs text-zinc-400 truncate">
+                  {{ firewallInstalledSummary }}
+                </div>
+              </div>
+            </div>
+            <span
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-medium shrink-0"
+              :class="securityData.firewall?.active
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                : 'bg-white/[0.03] border-zinc-700/60 text-zinc-300'"
+            >
+              <span class="w-1.5 h-1.5 rounded-full" :class="securityData.firewall?.active ? 'bg-emerald-400' : 'bg-zinc-400'"></span>
+              {{ securityData.firewall?.active ? 'Em execução' : (securityData.firewall?.engine_id && securityData.firewall?.engine_id !== 'none' ? 'Detectado' : 'Ausente') }}
+            </span>
+          </div>
+
+          <!-- Card 2: Firewall do host -->
+          <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-white/[0.025] border border-zinc-700/60">
+            <div class="flex items-center gap-3 min-w-0">
+              <div class="w-8 h-8 rounded-full bg-white/[0.04] border border-zinc-700/60 flex items-center justify-center shrink-0">
+                <Shield class="w-4 h-4" :class="securityData.firewall?.active ? 'text-emerald-400' : 'text-zinc-400'" />
+              </div>
+              <div class="min-w-0">
+                <div class="text-sm font-medium text-white">Firewall do host</div>
+                <div class="text-xs" :class="securityData.firewall?.active ? 'text-emerald-400' : 'text-zinc-400'">
+                  {{ securityData.firewall?.active ? 'Habilitado' : 'Desabilitado' }}
+                </div>
+              </div>
+            </div>
+            <button
+              @click="toggleFirewall(!securityData.firewall?.active)"
+              :disabled="fwToggling"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border text-xs font-medium transition cursor-pointer shrink-0 disabled:opacity-50"
+              :class="securityData.firewall?.active
+                ? 'bg-red-500/10 hover:bg-red-500/20 border-red-500/30 text-red-400'
+                : 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400'"
+            >
+              <Power class="w-3.5 h-3.5" />
+              {{ fwToggling ? 'Aplicando...' : (securityData.firewall?.active ? 'Desabilitar' : 'Habilitar') }}
             </button>
           </div>
+        </div>
+
+        <!-- Banner informativo azul (1:1 ProxMenux) -->
+        <div class="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-blue-500/10 border border-blue-500/25 text-xs text-blue-300">
+          <Info class="w-4 h-4 text-blue-400 shrink-0" />
+          <span v-if="!securityData.firewall?.active">
+            Libere as portas essenciais (como 8008 e SSH 22) nas regras de acesso rápido antes de habilitar o firewall do host.
+          </span>
+          <span v-else>
+            Firewall <strong>{{ firewallEngineName }}</strong> ativo e protegendo o host{{ securityData.firewall?.default_policy ? ` (${securityData.firewall.default_policy})` : '' }}.
+          </span>
+        </div>
+
+        <div v-if="fwNotice" class="px-3.5 py-2 rounded-lg text-xs border" :class="fwNoticeError ? 'bg-red-500/10 border-red-500/30 text-red-300' : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'">
+          {{ fwNotice }}
         </div>
 
         <!-- Regras de acesso rápido (1:1 ProxMenux) -->
         <div class="space-y-2">
-          <div class="text-xs font-semibold text-zinc-400">Regras de acesso rápido</div>
+          <div class="text-xs font-medium text-zinc-400">Regras de acesso rápido</div>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-            <div class="flex items-center justify-between p-3 rounded-lg bg-zinc-950/70 border border-zinc-800">
-              <div>
-                <div class="font-semibold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> Linux Menux - Monitor</div>
-                <div class="text-zinc-400 mt-0.5">Monitorar porta 8008 (TCP)</div>
+            <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-white/[0.025] border border-zinc-700/60">
+              <div class="min-w-0">
+                <div class="font-medium text-white flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full shrink-0" :class="securityData.firewall?.has_port_8008 ? 'bg-emerald-400' : 'bg-amber-400'"></span>
+                  Linux Menux - Monitor
+                </div>
+                <div class="text-zinc-400 mt-0.5">Monitorar porta 8008</div>
               </div>
-              <button @click="$emit('update:newFwPort', '8008'); $emit('update:newFwProto', 'tcp'); $emit('update:newFwAction', 'allow'); $emit('add-fw-rule')"
-                class="px-3 py-1 rounded bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 font-semibold cursor-pointer">
+              <span v-if="securityData.firewall?.has_port_8008" class="text-xs text-emerald-400 font-medium shrink-0">Permitida</span>
+              <button
+                v-else
+                @click="allowQuickPort('8008', 'tcp')"
+                class="px-3 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-medium cursor-pointer shrink-0 transition"
+              >
                 Permitir
               </button>
             </div>
-            <div class="flex items-center justify-between p-3 rounded-lg bg-zinc-950/70 border border-zinc-800">
-              <div>
-                <div class="font-semibold text-white flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-blue-400"></span> Acesso SSH</div>
-                <div class="text-zinc-400 mt-0.5">Porta padrão SSH 22 (TCP)</div>
+
+            <div class="flex items-center justify-between gap-3 px-4 py-3 rounded-lg bg-white/[0.025] border border-zinc-700/60">
+              <div class="min-w-0">
+                <div class="font-medium text-white flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>
+                  Acesso SSH
+                </div>
+                <div class="text-zinc-400 mt-0.5">A porta SSH 22 para administração remota.</div>
               </div>
-              <button @click="$emit('update:newFwPort', '22'); $emit('update:newFwProto', 'tcp'); $emit('update:newFwAction', 'allow'); $emit('add-fw-rule')"
-                class="px-3 py-1 rounded bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-300 font-semibold cursor-pointer">
+              <span v-if="securityData.firewall?.has_port_22" class="text-xs text-emerald-400 font-medium shrink-0">Permitida</span>
+              <button
+                v-else
+                @click="allowQuickPort('22', 'tcp')"
+                class="px-3 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-emerald-400 font-medium cursor-pointer shrink-0 transition"
+              >
                 Permitir
               </button>
             </div>
           </div>
         </div>
 
-        <div class="flex items-center justify-between gap-2 flex-wrap">
-          <div class="flex gap-1 bg-zinc-950 border border-zinc-800 rounded-lg p-1 text-xs">
-            <button v-for="f in ['all', 'allow', 'deny']" :key="f" @click="fwFilter = f"
-              class="px-3 py-1 rounded-md cursor-pointer transition"
-              :class="fwFilter === f ? 'bg-blue-600 text-white font-semibold' : 'text-zinc-400 hover:text-white'">
-              {{ f === 'all' ? 'Todas' : (f === 'allow' ? 'Permitidas' : 'Bloqueadas') }}
+        <!-- Cabeçalho da lista de regras (1:1 ProxMenux) -->
+        <div class="flex items-center justify-between gap-3 flex-wrap pt-1">
+          <div class="flex items-center gap-3 flex-wrap">
+            <span class="text-xs text-zinc-400 font-medium">
+              {{ parsedFwRules.length }} {{ parsedFwRules.length === 1 ? 'regra' : 'regras' }}
+            </span>
+            <div v-if="parsedFwRules.length > 0" class="flex items-center gap-2">
+              <div class="flex gap-1 bg-white/[0.03] border border-zinc-700/60 rounded-lg p-0.5 text-xs">
+                <button
+                  v-for="f in ['all', 'allow', 'deny']"
+                  :key="f"
+                  @click="fwFilter = f"
+                  class="px-2.5 py-0.5 rounded-md cursor-pointer transition"
+                  :class="fwFilter === f ? 'bg-white/[0.1] text-white font-medium' : 'text-zinc-400 hover:text-zinc-200'"
+                >
+                  {{ f === 'all' ? 'Todas' : (f === 'allow' ? 'Permitidas' : 'Bloqueadas') }}
+                </button>
+              </div>
+              <input
+                v-model="fwSearch"
+                type="text"
+                placeholder="Filtrar regras..."
+                class="bg-white/[0.03] border border-zinc-700/60 rounded-lg px-2.5 py-1 text-xs text-white placeholder-zinc-500 w-36 sm:w-44 focus:outline-none focus:border-zinc-500"
+              />
+            </div>
+          </div>
+
+          <button
+            @click="showAddFwModal = true"
+            class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-orange-500/30 bg-orange-500/10 hover:bg-orange-500/20 text-orange-400 text-xs font-medium cursor-pointer transition"
+          >
+            <Plus class="w-3.5 h-3.5" />
+            Adicionar regra
+          </button>
+        </div>
+
+        <!-- Lista de regras ou Empty State tracejado (1:1 ProxMenux, zero fundo preto) -->
+        <div
+          v-if="!filteredFwRules.length"
+          class="border border-dashed border-zinc-700/70 rounded-lg py-10 px-4 text-center bg-white/[0.015]"
+        >
+          <Shield class="w-8 h-8 text-zinc-500 mx-auto mb-2.5" />
+          <div class="text-sm font-medium text-zinc-300">
+            {{ parsedFwRules.length ? 'Nenhuma regra encontrada para o filtro.' : 'Ainda não há regras de firewall.' }}
+          </div>
+          <div class="text-xs text-zinc-500 mt-1">
+            Adicione uma regra ou use uma predefinição acima.
+          </div>
+        </div>
+
+        <div
+          v-else
+          class="max-h-64 overflow-y-auto bg-white/[0.02] border border-zinc-700/60 rounded-lg divide-y divide-zinc-800/70 text-xs"
+        >
+          <div
+            v-for="(r, idx) in filteredFwRules"
+            :key="r.number || idx"
+            class="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-white/[0.02] transition"
+          >
+            <div class="flex items-center gap-3 min-w-0">
+              <span class="text-zinc-500 font-mono w-6 shrink-0">#{{ r.number || (idx + 1) }}</span>
+              <span
+                class="px-2 py-0.5 rounded text-[11px] font-semibold uppercase border shrink-0"
+                :class="r.action === 'deny'
+                  ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'"
+              >
+                {{ r.action_label || (r.action === 'deny' ? 'DENY' : 'ALLOW') }}
+              </span>
+              <span class="font-mono text-zinc-200 truncate">{{ r.target || r.raw }}</span>
+              <span v-if="r.from_ip" class="text-zinc-500 hidden sm:inline truncate">← {{ r.from_ip }}</span>
+            </div>
+            <button
+              @click="deleteFwRule(r.number || (idx + 1))"
+              class="inline-flex items-center gap-1 text-red-400 hover:text-red-300 text-xs shrink-0 cursor-pointer"
+              title="Remover regra"
+            >
+              <Trash2 class="w-3.5 h-3.5" />
+              <span class="hidden sm:inline">Remover</span>
             </button>
           </div>
-          <input v-model="fwSearch" type="text" placeholder="Filtrar regras..." class="bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-xs text-white w-48" />
         </div>
+      </div>
 
-        <div class="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-lg p-3 text-xs font-mono space-y-1.5">
-          <div v-if="!filteredFwRules.length" class="text-zinc-500 font-sans text-center py-4">Nenhuma regra listada para o filtro selecionado.</div>
-          <div v-for="(r, idx) in filteredFwRules" :key="idx" class="flex items-center justify-between gap-2 py-1 border-b border-zinc-900 last:border-0 text-zinc-300">
-            <span class="truncate">{{ r }}</span>
-            <button @click="deleteFwRule(idx + 1)" class="text-red-400 hover:text-red-300 text-xs font-sans shrink-0 cursor-pointer">Remover</button>
+      <!-- Modal Adicionar Regra de Firewall -->
+      <div
+        v-if="showAddFwModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        @click.self="showAddFwModal = false"
+      >
+        <div class="w-full max-w-md bg-[var(--card)] border border-zinc-700/80 rounded-xl p-5 space-y-4 shadow-2xl">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <Flame class="w-4 h-4 text-orange-400" />
+              <h4 class="text-sm font-semibold text-white">Adicionar regra de firewall</h4>
+            </div>
+            <button @click="showAddFwModal = false" class="text-zinc-400 hover:text-white cursor-pointer">
+              <X class="w-4 h-4" />
+            </button>
           </div>
-        </div>
-
-        <div class="flex flex-wrap gap-2 pt-2 border-t border-zinc-800 text-xs">
-          <input :value="newFwPort" @input="$emit('update:newFwPort', $event.target.value)" type="text" placeholder="Porta (ex: 8008)" class="w-36 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-white" />
-          <select :value="newFwProto" @change="$emit('update:newFwProto', $event.target.value)" class="bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-white">
-            <option value="tcp">TCP</option>
-            <option value="udp">UDP</option>
-          </select>
-          <select :value="newFwAction" @change="$emit('update:newFwAction', $event.target.value)" class="bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-white">
-            <option value="allow">Permitir (ALLOW)</option>
-            <option value="deny">Bloquear (DENY)</option>
-          </select>
-          <button @click="$emit('add-fw-rule')" class="bg-blue-600 hover:bg-blue-500 text-white px-4 py-1.5 rounded-md font-semibold cursor-pointer">+ Adicionar Regra</button>
+          <div class="space-y-3 text-xs">
+            <div>
+              <label class="block text-zinc-400 mb-1">Porta (1 - 65535)</label>
+              <input
+                :value="newFwPort"
+                @input="$emit('update:newFwPort', $event.target.value)"
+                type="text"
+                placeholder="Ex: 8008, 443, 8080"
+                class="w-full bg-white/[0.04] border border-zinc-700 rounded-lg px-3 py-2 text-white placeholder-zinc-500 focus:outline-none focus:border-orange-500/60"
+              />
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-zinc-400 mb-1">Protocolo</label>
+                <select
+                  :value="newFwProto"
+                  @change="$emit('update:newFwProto', $event.target.value)"
+                  class="w-full bg-white/[0.04] border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none"
+                >
+                  <option value="tcp" class="bg-zinc-900">TCP</option>
+                  <option value="udp" class="bg-zinc-900">UDP</option>
+                </select>
+              </div>
+              <div>
+                <label class="block text-zinc-400 mb-1">Ação</label>
+                <select
+                  :value="newFwAction"
+                  @change="$emit('update:newFwAction', $event.target.value)"
+                  class="w-full bg-white/[0.04] border border-zinc-700 rounded-lg px-3 py-2 text-white focus:outline-none"
+                >
+                  <option value="allow" class="bg-zinc-900">Permitir (ALLOW)</option>
+                  <option value="deny" class="bg-zinc-900">Bloquear (DENY)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800/80 text-xs">
+            <button
+              @click="showAddFwModal = false"
+              class="px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-white/[0.04] cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              @click="submitNewFwRule"
+              class="px-4 py-1.5 rounded-lg bg-orange-500 hover:bg-orange-400 text-white font-semibold cursor-pointer"
+            >
+              Adicionar regra
+            </button>
+          </div>
         </div>
       </div>
 
@@ -396,7 +599,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { Lock, Key, Eye, EyeOff, ShieldCheck, Shield, ShieldAlert, Globe, FileSearch, Copy } from 'lucide-vue-next'
+import { Lock, Key, Eye, EyeOff, ShieldCheck, Shield, ShieldAlert, Globe, FileSearch, Copy, Flame, RefreshCw, Power, Info, Plus, Trash2, X } from 'lucide-vue-next'
 import { fetchApi, setAuthToken } from '../lib/api-config'
 
 const props = defineProps({
@@ -409,7 +612,7 @@ const props = defineProps({
   secInstalling: { type: String, default: '' },
   lynisRunning: { type: Boolean, default: false },
 })
-defineEmits(['update:newFwPort', 'update:newFwProto', 'update:newFwAction', 'update:newTokenName', 'add-fw-rule', 'generate-token', 'revoke-token', 'install-tool', 'run-lynis'])
+const emit = defineEmits(['update:newFwPort', 'update:newFwProto', 'update:newFwAction', 'update:newTokenName', 'add-fw-rule', 'refresh-security', 'generate-token', 'revoke-token', 'install-tool', 'run-lynis'])
 
 const authEnabled = ref(false)
 const authUser = ref('admin')
@@ -429,15 +632,51 @@ const sslMsg = ref('')
 
 const fwFilter = ref('all')
 const fwSearch = ref('')
+const showAddFwModal = ref(false)
+const fwRefreshing = ref(false)
+const fwToggling = ref(false)
+const fwNotice = ref('')
+const fwNoticeError = ref(false)
 const f2bTrustedInput = ref('')
 const trustedIps = ref([])
 
+const firewallEngineName = computed(() => {
+  const eng = props.securityData?.firewall?.engine
+  return eng && eng !== 'Nenhum' ? eng : 'Não detectado'
+})
+
+const firewallInstalledSummary = computed(() => {
+  const list = props.securityData?.firewall?.installed_engines || []
+  if (!list.length) return 'Nenhum gerenciador (UFW/firewalld/iptables) instalado.'
+  const labels = list.map((e) => (e === 'ufw' ? 'UFW' : e))
+  return `Detectado: ${labels.join(' · ')}`
+})
+
+const parsedFwRules = computed(() => {
+  const fw = props.securityData?.firewall || {}
+  if (Array.isArray(fw.parsed_rules) && fw.parsed_rules.length) {
+    return fw.parsed_rules
+  }
+  return (fw.rules || []).map((r, i) => {
+    const raw = String(r)
+    const lower = raw.toLowerCase()
+    const isDeny = lower.includes('deny') || lower.includes('reject') || lower.includes('drop')
+    return {
+      number: String(i + 1),
+      target: raw,
+      action: isDeny ? 'deny' : 'allow',
+      action_label: isDeny ? 'DENY' : 'ALLOW',
+      from_ip: '',
+      raw,
+    }
+  })
+})
+
 const filteredFwRules = computed(() => {
-  const rules = props.securityData?.firewall?.rules || []
-  return rules.filter((r) => {
-    const text = String(r).toLowerCase()
-    if (fwFilter.value === 'allow' && !text.includes('allow')) return false
-    if (fwFilter.value === 'deny' && !text.includes('deny') && !text.includes('reject')) return false
+  return parsedFwRules.value.filter((r) => {
+    const text = `${r.target || ''} ${r.raw || ''} ${r.from_ip || ''}`.toLowerCase()
+    if (fwFilter.value === 'allow' && r.action !== 'allow') return false
+    if (fwFilter.value === 'deny' && r.action !== 'deny') return false
     if (fwSearch.value.trim() && !text.includes(fwSearch.value.trim().toLowerCase())) return false
     return true
   })
@@ -515,20 +754,65 @@ async function generateSelfSignedSsl() {
   }
 }
 
+async function refreshFirewall() {
+  fwRefreshing.value = true
+  try {
+    emit('refresh-security')
+  } finally {
+    setTimeout(() => { fwRefreshing.value = false }, 400)
+  }
+}
+
+function allowQuickPort(port, proto = 'tcp') {
+  emit('update:newFwPort', String(port))
+  emit('update:newFwProto', proto)
+  emit('update:newFwAction', 'allow')
+  emit('add-fw-rule')
+}
+
+function submitNewFwRule() {
+  if (!String(props.newFwPort || '').trim()) return
+  emit('add-fw-rule')
+  showAddFwModal.value = false
+}
+
 async function toggleFirewall(enable) {
-  await fetchApi('/api/security/firewall/toggle', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ enable }),
-  })
+  fwToggling.value = true
+  fwNotice.value = ''
+  fwNoticeError.value = false
+  try {
+    const res = await fetchApi('/api/security/firewall/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enable }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.success === false) {
+      fwNoticeError.value = true
+      fwNotice.value = data.error || data.output || 'Não foi possível alterar o estado do firewall.'
+    } else {
+      fwNotice.value = enable ? 'Firewall habilitado com sucesso.' : 'Firewall desabilitado.'
+    }
+    emit('refresh-security')
+  } finally {
+    fwToggling.value = false
+  }
 }
 
 async function deleteFwRule(number) {
-  await fetchApi('/api/security/firewall/rule', {
+  fwNotice.value = ''
+  fwNoticeError.value = false
+  const res = await fetchApi('/api/security/firewall/rule', {
     method: 'DELETE',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ number }),
+    body: JSON.stringify({ number: String(number) }),
   })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok || data.success === false) {
+    fwNoticeError.value = true
+    fwNotice.value = data.error || data.output || 'Não foi possível remover a regra.'
+  }
+  emit('refresh-security')
 }
 
 async function addTrustedIp() {

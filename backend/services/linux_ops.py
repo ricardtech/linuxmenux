@@ -320,6 +320,57 @@ def add_firewall_rule(port: str, proto: str = "tcp", action: str = "allow") -> D
         return {"success": False, "message": str(exc)}
 
 
+def toggle_firewall_engine(enable: bool) -> Dict[str, Any]:
+    """Ativa ou desativa o firewall detectado no host (UFW ou firewalld)."""
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" or ("ufw" in info.get("installed_engines", []) and engine_id in ("none", "iptables")):
+        ufw_bin = shutil.which("ufw")
+        if ufw_bin:
+            cmd = [ufw_bin, "--force", "enable"] if enable else [ufw_bin, "disable"]
+            proc = _run_cmd(cmd, timeout=15)
+            return {"success": proc.returncode == 0, "engine": "UFW", "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" or "firewalld" in info.get("installed_engines", []):
+        action = "start" if enable else "stop"
+        proc = _run_cmd(["systemctl", action, "firewalld"], timeout=15)
+        return {"success": proc.returncode == 0, "engine": "firewalld", "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": "Nenhum gerenciador com ativação automática (UFW ou firewalld) encontrado neste host."}
+
+
+def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
+    """Remove uma regra do firewall ativo (UFW, firewalld ou iptables)."""
+    rule_ref = str(rule_ref or "").strip()
+    if not rule_ref:
+        return {"success": False, "error": "Identificador da regra inválido."}
+
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" and shutil.which("ufw"):
+        if not rule_ref.isdigit():
+            return {"success": False, "error": "Número de regra UFW inválido."}
+        proc = _run_cmd(["ufw", "--force", "delete", rule_ref], timeout=15)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" and shutil.which("firewall-cmd"):
+        if rule_ref.startswith("svc:"):
+            svc = rule_ref[4:]
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-service={svc}"], timeout=10)
+        else:
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-port={rule_ref}"], timeout=10)
+        _run_cmd(["firewall-cmd", "--reload"], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
+        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
+
+
 def get_backup_file_path(filename: str) -> Optional[str]:
     if not re.match(r"^[a-zA-Z0-9._-]+\.tar\.gz$", filename):
         return None
@@ -445,32 +496,198 @@ def get_system_logs(
 
 # ─── Security (Firewall, Tailscale, Fail2Ban, Lynis, API Tokens) ──────────────
 
-def get_security_overview() -> Dict[str, Any]:
-    # Firewall multi-distro: UFW, firewalld, nftables, iptables
-    fw_engine = "Nenhum"
-    fw_active = False
-    fw_rules: List[str] = []
-
+def _inspect_firewall_smart() -> Dict[str, Any]:
+    """Detecta de forma inteligente UFW, firewalld, nftables e iptables, estado ativo e regras estruturadas."""
+    installed_engines: List[str] = []
     if shutil.which("ufw"):
-        p = _run_cmd(["ufw", "status"], timeout=5)
-        if p.returncode == 0 and "Status: active" in p.stdout:
-            fw_engine = "UFW"
-            fw_active = True
-            fw_rules = [l.strip() for l in p.stdout.splitlines()[3:] if l.strip()]
-    if not fw_active and shutil.which("firewall-cmd"):
+        installed_engines.append("ufw")
+    if shutil.which("firewall-cmd"):
+        installed_engines.append("firewalld")
+    if shutil.which("nft"):
+        installed_engines.append("nftables")
+    if shutil.which("iptables"):
+        installed_engines.append("iptables")
+
+    fw_engine = "Nenhum"
+    fw_engine_id = "none"
+    fw_active = False
+    default_policy = ""
+    fw_rules: List[str] = []
+    parsed_rules: List[Dict[str, Any]] = []
+
+    # 1. Verifica UFW (preferido quando ativo ou quando instalado no host)
+    if "ufw" in installed_engines:
+        p = _run_cmd(["ufw", "status", "verbose"], timeout=5)
+        if p.returncode == 0:
+            out = p.stdout or ""
+            is_ufw_active = "Status: active" in out
+            if is_ufw_active:
+                fw_engine = "UFW"
+                fw_engine_id = "ufw"
+                fw_active = True
+                for line in out.splitlines():
+                    if line.lower().startswith("default:"):
+                        default_policy = line.split(":", 1)[1].strip()
+                        break
+                pn = _run_cmd(["ufw", "status", "numbered"], timeout=5)
+                if pn.returncode == 0:
+                    for line in pn.stdout.splitlines():
+                        m = re.match(r"^\[\s*(\d+)\]\s+(.+?)\s+(ALLOW IN|DENY IN|REJECT IN|LIMIT IN|ALLOW OUT|DENY OUT|ALLOW|DENY|REJECT|LIMIT)\s+(.+)$", line.strip())
+                        if m:
+                            num = int(m.group(1))
+                            target = m.group(2).strip()
+                            action_raw = m.group(3).strip()
+                            from_ip = m.group(4).strip()
+                            action_norm = "deny" if ("DENY" in action_raw or "REJECT" in action_raw) else "allow"
+                            fw_rules.append(line.strip())
+                            parsed_rules.append({
+                                "number": str(num),
+                                "target": target,
+                                "action": action_norm,
+                                "action_label": action_raw,
+                                "from_ip": from_ip,
+                                "raw": line.strip(),
+                            })
+
+    # 2. Verifica firewalld se nenhum motor ativo foi encontrado ainda
+    if not fw_active and "firewalld" in installed_engines:
         p = _run_cmd(["firewall-cmd", "--state"], timeout=5)
-        if p.returncode == 0 and "running" in p.stdout:
+        if p.returncode == 0 and "running" in (p.stdout or "").lower():
             fw_engine = "firewalld"
+            fw_engine_id = "firewalld"
             fw_active = True
             lp = _run_cmd(["firewall-cmd", "--list-all"], timeout=5)
-            fw_rules = [l.strip() for l in lp.stdout.splitlines() if l.strip()]
-    if not fw_active and shutil.which("iptables"):
-        p = _run_cmd(["iptables", "-L", "INPUT", "-n"], timeout=5)
+            if lp.returncode == 0:
+                zone_ports: List[str] = []
+                zone_services: List[str] = []
+                for line in lp.stdout.splitlines():
+                    s = line.strip()
+                    if s.startswith("target:"):
+                        default_policy = s.split(":", 1)[1].strip()
+                    elif s.startswith("ports:"):
+                        zone_ports = [x for x in s.split(":", 1)[1].strip().split() if x]
+                    elif s.startswith("services:"):
+                        zone_services = [x for x in s.split(":", 1)[1].strip().split() if x]
+                for pt in zone_ports:
+                    raw = f"{pt} ALLOW IN (firewalld)"
+                    fw_rules.append(raw)
+                    parsed_rules.append({
+                        "number": pt,
+                        "target": pt,
+                        "action": "allow",
+                        "action_label": "ALLOW IN",
+                        "from_ip": "zone",
+                        "raw": raw,
+                    })
+                for svc in zone_services:
+                    raw = f"service:{svc} ALLOW IN (firewalld)"
+                    fw_rules.append(raw)
+                    parsed_rules.append({
+                        "number": f"svc:{svc}",
+                        "target": svc,
+                        "action": "allow",
+                        "action_label": "SERVICE",
+                        "from_ip": "zone",
+                        "raw": raw,
+                    })
+
+    # 3. Verifica nftables se ainda inativo
+    if not fw_active and "nftables" in installed_engines:
+        svc = _run_cmd(["systemctl", "is-active", "nftables"], timeout=4)
+        if svc.returncode == 0 and svc.stdout.strip() == "active":
+            fw_engine = "nftables"
+            fw_engine_id = "nftables"
+            fw_active = True
+            np = _run_cmd(["nft", "list", "ruleset"], timeout=5)
+            if np.returncode == 0:
+                for line in np.stdout.splitlines():
+                    s = line.strip()
+                    if "dport" in s or "policy" in s:
+                        if "policy " in s and not default_policy:
+                            default_policy = s
+                        elif "dport" in s:
+                            action_norm = "deny" if ("drop" in s or "reject" in s) else "allow"
+                            fw_rules.append(s)
+                            parsed_rules.append({
+                                "number": str(len(parsed_rules) + 1),
+                                "target": s,
+                                "action": action_norm,
+                                "action_label": "DROP" if action_norm == "deny" else "ACCEPT",
+                                "from_ip": "Anywhere",
+                                "raw": s,
+                            })
+
+    # 4. Verifica iptables se nenhum dos gerenciadores acima está ativo
+    if not fw_active and "iptables" in installed_engines:
+        p = _run_cmd(["iptables", "-L", "INPUT", "-n", "--line-numbers"], timeout=5)
         if p.returncode == 0:
-            lines = [l.strip() for l in p.stdout.splitlines()[2:] if l.strip()]
+            raw_lines = p.stdout.splitlines()
+            if raw_lines and "policy " in raw_lines[0]:
+                m_pol = re.search(r"policy\s+(\w+)", raw_lines[0])
+                if m_pol:
+                    default_policy = m_pol.group(1)
+            for line in raw_lines[2:]:
+                s = line.strip()
+                if not s:
+                    continue
+                parts = s.split()
+                if len(parts) >= 5 and parts[0].isdigit():
+                    num = parts[0]
+                    target_act = parts[1]
+                    proto = parts[2]
+                    src = parts[4]
+                    dport_m = re.search(r"dpt:(\d+)", s)
+                    target_label = f"{dport_m.group(1)}/{proto}" if dport_m else f"{proto} ({src})"
+                    action_norm = "deny" if target_act in ("DROP", "REJECT") else "allow"
+                    fw_rules.append(s)
+                    parsed_rules.append({
+                        "number": num,
+                        "target": target_label,
+                        "action": action_norm,
+                        "action_label": target_act,
+                        "from_ip": src,
+                        "raw": s,
+                    })
+            if parsed_rules:
+                fw_engine = "iptables"
+                fw_engine_id = "iptables"
+                fw_active = True
+
+    # 5. Se nenhum motor está ativo, identifica o melhor motor instalado pronto para uso
+    if not fw_active and fw_engine_id == "none":
+        if "ufw" in installed_engines:
+            fw_engine = "UFW"
+            fw_engine_id = "ufw"
+        elif "firewalld" in installed_engines:
+            fw_engine = "firewalld"
+            fw_engine_id = "firewalld"
+        elif "iptables" in installed_engines:
             fw_engine = "iptables"
-            fw_active = len(lines) > 0
-            fw_rules = lines[:30]
+            fw_engine_id = "iptables"
+        elif "nftables" in installed_engines:
+            fw_engine = "nftables"
+            fw_engine_id = "nftables"
+
+    rules_joined = " ".join(fw_rules).lower()
+    has_port_8008 = bool(re.search(r"(?:^|\D)8008(?:/tcp|\b)", rules_joined))
+    has_port_22 = bool(re.search(r"(?:^|\D)22(?:/tcp|\b)|ssh", rules_joined))
+
+    return {
+        "engine": fw_engine,
+        "engine_id": fw_engine_id,
+        "installed_engines": installed_engines,
+        "active": fw_active,
+        "default_policy": default_policy,
+        "rules": fw_rules[:50],
+        "parsed_rules": parsed_rules[:50],
+        "has_port_8008": has_port_8008,
+        "has_port_22": has_port_22,
+    }
+
+
+def get_security_overview() -> Dict[str, Any]:
+    # Firewall multi-distro inteligente: UFW, firewalld, nftables, iptables
+    fw_info = _inspect_firewall_smart()
 
     # Tailscale
     ts_bin = shutil.which("tailscale")
@@ -531,7 +748,7 @@ def get_security_overview() -> Dict[str, Any]:
     tokens = _read_json("api_tokens.json", [])
 
     return {
-        "firewall": {"engine": fw_engine, "active": fw_active, "rules": fw_rules},
+        "firewall": fw_info,
         "tailscale": {"installed": ts_installed, "running": ts_running, "ip": ts_ip},
         "fail2ban": {
             "installed": f2b_installed,
@@ -620,6 +837,57 @@ def add_firewall_rule(port: str, proto: str = "tcp", action: str = "allow") -> D
         return {"success": False, "message": "Nenhum firewall (UFW, firewalld, iptables) encontrado"}
     except Exception as exc:
         return {"success": False, "message": str(exc)}
+
+
+def toggle_firewall_engine(enable: bool) -> Dict[str, Any]:
+    """Ativa ou desativa o firewall detectado no host (UFW ou firewalld)."""
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" or ("ufw" in info.get("installed_engines", []) and engine_id in ("none", "iptables")):
+        ufw_bin = shutil.which("ufw")
+        if ufw_bin:
+            cmd = [ufw_bin, "--force", "enable"] if enable else [ufw_bin, "disable"]
+            proc = _run_cmd(cmd, timeout=15)
+            return {"success": proc.returncode == 0, "engine": "UFW", "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" or "firewalld" in info.get("installed_engines", []):
+        action = "start" if enable else "stop"
+        proc = _run_cmd(["systemctl", action, "firewalld"], timeout=15)
+        return {"success": proc.returncode == 0, "engine": "firewalld", "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": "Nenhum gerenciador com ativação automática (UFW ou firewalld) encontrado neste host."}
+
+
+def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
+    """Remove uma regra do firewall ativo (UFW, firewalld ou iptables)."""
+    rule_ref = str(rule_ref or "").strip()
+    if not rule_ref:
+        return {"success": False, "error": "Identificador da regra inválido."}
+
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" and shutil.which("ufw"):
+        if not rule_ref.isdigit():
+            return {"success": False, "error": "Número de regra UFW inválido."}
+        proc = _run_cmd(["ufw", "--force", "delete", rule_ref], timeout=15)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" and shutil.which("firewall-cmd"):
+        if rule_ref.startswith("svc:"):
+            svc = rule_ref[4:]
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-service={svc}"], timeout=10)
+        else:
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-port={rule_ref}"], timeout=10)
+        _run_cmd(["firewall-cmd", "--reload"], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
+        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
 
 
 def get_backup_file_path(filename: str) -> Optional[str]:
@@ -965,6 +1233,57 @@ def add_firewall_rule(port: str, proto: str = "tcp", action: str = "allow") -> D
         return {"success": False, "message": "Nenhum firewall (UFW, firewalld, iptables) encontrado"}
     except Exception as exc:
         return {"success": False, "message": str(exc)}
+
+
+def toggle_firewall_engine(enable: bool) -> Dict[str, Any]:
+    """Ativa ou desativa o firewall detectado no host (UFW ou firewalld)."""
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" or ("ufw" in info.get("installed_engines", []) and engine_id in ("none", "iptables")):
+        ufw_bin = shutil.which("ufw")
+        if ufw_bin:
+            cmd = [ufw_bin, "--force", "enable"] if enable else [ufw_bin, "disable"]
+            proc = _run_cmd(cmd, timeout=15)
+            return {"success": proc.returncode == 0, "engine": "UFW", "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" or "firewalld" in info.get("installed_engines", []):
+        action = "start" if enable else "stop"
+        proc = _run_cmd(["systemctl", action, "firewalld"], timeout=15)
+        return {"success": proc.returncode == 0, "engine": "firewalld", "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": "Nenhum gerenciador com ativação automática (UFW ou firewalld) encontrado neste host."}
+
+
+def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
+    """Remove uma regra do firewall ativo (UFW, firewalld ou iptables)."""
+    rule_ref = str(rule_ref or "").strip()
+    if not rule_ref:
+        return {"success": False, "error": "Identificador da regra inválido."}
+
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" and shutil.which("ufw"):
+        if not rule_ref.isdigit():
+            return {"success": False, "error": "Número de regra UFW inválido."}
+        proc = _run_cmd(["ufw", "--force", "delete", rule_ref], timeout=15)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" and shutil.which("firewall-cmd"):
+        if rule_ref.startswith("svc:"):
+            svc = rule_ref[4:]
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-service={svc}"], timeout=10)
+        else:
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-port={rule_ref}"], timeout=10)
+        _run_cmd(["firewall-cmd", "--reload"], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
+        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
 
 
 def get_backup_file_path(filename: str) -> Optional[str]:
@@ -1334,6 +1653,57 @@ def add_firewall_rule(port: str, proto: str = "tcp", action: str = "allow") -> D
         return {"success": False, "message": "Nenhum firewall (UFW, firewalld, iptables) encontrado"}
     except Exception as exc:
         return {"success": False, "message": str(exc)}
+
+
+def toggle_firewall_engine(enable: bool) -> Dict[str, Any]:
+    """Ativa ou desativa o firewall detectado no host (UFW ou firewalld)."""
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" or ("ufw" in info.get("installed_engines", []) and engine_id in ("none", "iptables")):
+        ufw_bin = shutil.which("ufw")
+        if ufw_bin:
+            cmd = [ufw_bin, "--force", "enable"] if enable else [ufw_bin, "disable"]
+            proc = _run_cmd(cmd, timeout=15)
+            return {"success": proc.returncode == 0, "engine": "UFW", "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" or "firewalld" in info.get("installed_engines", []):
+        action = "start" if enable else "stop"
+        proc = _run_cmd(["systemctl", action, "firewalld"], timeout=15)
+        return {"success": proc.returncode == 0, "engine": "firewalld", "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": "Nenhum gerenciador com ativação automática (UFW ou firewalld) encontrado neste host."}
+
+
+def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
+    """Remove uma regra do firewall ativo (UFW, firewalld ou iptables)."""
+    rule_ref = str(rule_ref or "").strip()
+    if not rule_ref:
+        return {"success": False, "error": "Identificador da regra inválido."}
+
+    info = _inspect_firewall_smart()
+    engine_id = info.get("engine_id", "none")
+
+    if engine_id == "ufw" and shutil.which("ufw"):
+        if not rule_ref.isdigit():
+            return {"success": False, "error": "Número de regra UFW inválido."}
+        proc = _run_cmd(["ufw", "--force", "delete", rule_ref], timeout=15)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "firewalld" and shutil.which("firewall-cmd"):
+        if rule_ref.startswith("svc:"):
+            svc = rule_ref[4:]
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-service={svc}"], timeout=10)
+        else:
+            proc = _run_cmd(["firewall-cmd", "--permanent", f"--remove-port={rule_ref}"], timeout=10)
+        _run_cmd(["firewall-cmd", "--reload"], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
+        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+
+    return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
 
 
 def get_backup_file_path(filename: str) -> Optional[str]:

@@ -384,6 +384,7 @@
           :sec-installing="secInstalling"
           :lynis-running="lynisRunning"
           @add-fw-rule="addFwRule"
+          @refresh-security="fetchSecurity"
           @generate-token="generateApiToken"
           @revoke-token="revokeApiToken"
           @install-tool="installSecTool"

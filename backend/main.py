@@ -87,6 +87,8 @@ from services.linux_ops import (
     get_interface_detail,
     send_test_notification,
     add_firewall_rule,
+    toggle_firewall_engine,
+    delete_firewall_rule,
     get_backup_file_path,
     get_app_overrides,
     save_app_override,
@@ -1793,27 +1795,16 @@ def api_ssl_self_signed():
 
 @app.post("/api/security/firewall/toggle")
 async def api_firewall_toggle(request: Request):
-    import shutil
     body = await request.json()
     enable = bool(body.get("enable", True))
-    ufw_bin = shutil.which("ufw")
-    if not ufw_bin:
-        return {"success": False, "error": "UFW não instalado neste host."}
-    cmd = [ufw_bin, "--force", "enable"] if enable else [ufw_bin, "disable"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-    return {"success": proc.returncode == 0, "output": proc.stdout + proc.stderr}
+    return toggle_firewall_engine(enable)
 
 
 @app.delete("/api/security/firewall/rule")
 async def api_firewall_delete_rule(request: Request):
-    import shutil
     body = await request.json()
     rule_num = str(body.get("number") or "").strip()
-    ufw_bin = shutil.which("ufw")
-    if not ufw_bin or not rule_num.isdigit():
-        return {"success": False, "error": "Regra inválida ou UFW ausente."}
-    proc = subprocess.run([ufw_bin, "--force", "delete", rule_num], capture_output=True, text=True, timeout=15)
-    return {"success": proc.returncode == 0, "output": proc.stdout + proc.stderr}
+    return delete_firewall_rule(rule_num)
 
 
 @app.post("/api/security/fail2ban/unban")
