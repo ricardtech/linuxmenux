@@ -2140,11 +2140,11 @@ async def websocket_system_update(websocket: WebSocket, ticket: str = Query(None
                 stderr=asyncio.subprocess.STDOUT,
             )
             while True:
-                line = await proc.stdout.readline()
-                if not line:
+                chunk = await proc.stdout.read(256)
+                if not chunk:
                     break
-                text = line.decode("utf-8", errors="replace").rstrip("\n")
-                await websocket.send_text(text + "\r\n")
+                text = chunk.decode("utf-8", errors="replace").replace("\r\n", "\n").replace("\n", "\r\n")
+                await websocket.send_text(text)
             rc = await proc.wait()
             if rc != 0:
                 await websocket.send_text(f"\r\n\x1b[31m✖ Comando encerrou com código {rc}.\x1b[0m\r\n")

@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.3.8] - 25/11/2026
+
+### Alterado & Corrigido
+- **Streaming em tempo real no terminal de atualização (`/ws/system/update`)**: substituído `readline()` por leitura em chunks (`read(256)`) para exibir imediatamente as barras de progresso (`\r`) do `pacman` sem parecer travado durante downloads grandes.
+
+### 📊 Métricas de Código
+- **Total**: **25.662 linhas** de código em **93 arquivos-fonte** (`8.492` `.vue` · `6.625` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
 ## [1.3.7] - 25/11/2026
 
 ### Adicionado
