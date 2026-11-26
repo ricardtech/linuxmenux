@@ -56,14 +56,14 @@ def check_updates(force_sync: bool = False) -> Dict[str, Any]:
             parsed_lines: List[str] = []
 
             if pamac_bin:
-                proc = subprocess.run([pamac_bin, "checkupdates", "-a", "-q"], capture_output=True, text=True, timeout=45)
+                proc = subprocess.run([pamac_bin, "checkupdates", "-a", "-q"], capture_output=True, text=True, timeout=120)
                 if proc.returncode in (0, 100) and proc.stdout.strip():
                     parsed_lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
 
             if not parsed_lines and checkupdates_bin:
                 env = os.environ.copy()
                 env["CHECKUPDATES_DB"] = "/tmp/linuxmenux-checkup-db"
-                proc = subprocess.run([checkupdates_bin], capture_output=True, text=True, timeout=45, env=env)
+                proc = subprocess.run([checkupdates_bin], capture_output=True, text=True, timeout=60, env=env)
                 if proc.returncode == 0 and proc.stdout.strip():
                     parsed_lines = [l.strip() for l in proc.stdout.splitlines() if l.strip()]
                 elif proc.returncode == 2:
@@ -71,24 +71,19 @@ def check_updates(force_sync: bool = False) -> Dict[str, Any]:
 
             if not parsed_lines and not pamac_bin and not checkupdates_bin:
                 if force_sync:
-                    subprocess.run(["pacman", "-Sy", "--noconfirm"], capture_output=True, text=True, timeout=45)
+                    subprocess.run(["pacman", "-Sy", "--noconfirm"], capture_output=True, text=True, timeout=60)
                 fb_proc = subprocess.run(["pacman", "-Qu"], capture_output=True, text=True, timeout=15)
                 parsed_lines = [l.strip() for l in fb_proc.stdout.splitlines() if l.strip()]
 
-            vercmp_bin = shutil.which("vercmp")
             filtered_pkgs: List[Dict[str, str]] = []
             for line in parsed_lines[:80]:
+                # Ignora linhas de aviso/warning do pamac
+                if line.lower().startswith(("aviso:", "warning:", "erro:", "error:")):
+                    continue
                 parts = line.split()
-                if len(parts) >= 4:
+                if len(parts) >= 4 and "->" in parts:
                     old_v = parts[1]
                     new_v = parts[3]
-                    if vercmp_bin and old_v and new_v:
-                        try:
-                            vp = subprocess.run([vercmp_bin, new_v, old_v], capture_output=True, text=True, timeout=2)
-                            if vp.returncode == 0 and int(vp.stdout.strip()) <= 0:
-                                continue  # Ignora downgrades / falso-positivos de mirrors
-                        except Exception:
-                            pass
                     filtered_pkgs.append({"name": parts[0], "old_version": old_v, "new_version": new_v})
                 elif len(parts) >= 2:
                     filtered_pkgs.append({"name": parts[0], "old_version": "", "new_version": parts[-1]})
@@ -137,6 +132,31 @@ def check_updates(force_sync: bool = False) -> Dict[str, Any]:
 
     except (subprocess.SubprocessError, OSError) as e:
         result["error"] = str(e)
+
+    # Multi-distro: Flatpak updates (independente do gerenciador nativo)
+    flatpak_bin = shutil.which("flatpak")
+    if flatpak_bin and not result.get("error"):
+        try:
+            fp = subprocess.run(
+                [flatpak_bin, "remote-ls", "--updates", "--columns=application,version"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if fp.returncode == 0 and fp.stdout.strip():
+                existing = {p.get("name") for p in result["packages"]}
+                for fline in fp.stdout.splitlines():
+                    fparts = fline.strip().split()
+                    if not fparts:
+                        continue
+                    app_id = fparts[0]
+                    if app_id in existing or app_id.lower() == "application":
+                        continue
+                    ver = fparts[1] if len(fparts) > 1 else ""
+                    result["packages"].append({"name": f"{app_id} (Flatpak)", "old_version": "", "new_version": ver})
+                result["pending_count"] = len(result["packages"])
+        except Exception:
+            pass
 
     return result
 

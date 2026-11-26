@@ -2,6 +2,17 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.4] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.120 linhas** de código em **94 arquivos-fonte** (`9.278` `.vue` · `7.297` `.py` · `7.610` `.css` · `2.668` `.js` · `249` `.sh` · `18` `.service`).
+
+### Corrigido
+- **Timeout silencioso no `pamac checkupdates -a -q` (`pkg_manager.py` & `metrics_history.py`)**: aumentado o timeout de `45s` para `120s` (o `pamac` com AUR + checagem de espelhos chegava a levar >45s, estourava `TimeoutExpired` e o cache gravava `0 pacotes pendentes`), impedido que respostas com `error` sobrescrevam o cache válido, e removido o filtro que ocultava pacotes nativos listados pelo próprio Pamac GUI (batendo exatamente as `7` atualizações reais).
+
+### Adicionado
+- **Detecção de atualizações Flatpak multi-distro (`pkg_manager.py`)**: adicionado suporte universal a `flatpak remote-ls --updates` somando pacotes Flatpak pendentes em Debian, Ubuntu, Manjaro, BigLinux, Fedora e openSUSE.
+
 ## [1.4.3] - 26/11/2026
 
 ### 📊 Métricas de Código

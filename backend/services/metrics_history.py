@@ -362,9 +362,14 @@ def get_cached_updates(force_refresh: bool = False) -> Dict[str, Any]:
     updates = check_updates(force_sync=force_refresh)
     reboot = check_reboot_required()
     with _updates_cache_lock:
-        _updates_cache["timestamp"] = now
-        _updates_cache["updates"] = updates
-        _updates_cache["reboot"] = reboot
+        # Só grava no cache se não houve erro/timeout, ou se o cache ainda estiver vazio
+        if not updates.get("error") or _updates_cache["updates"] is None:
+            _updates_cache["timestamp"] = now
+            _updates_cache["updates"] = updates
+            _updates_cache["reboot"] = reboot
+        else:
+            updates = _updates_cache["updates"]
+            reboot = _updates_cache["reboot"]
 
     return {"updates": updates, "reboot": reboot}
 
