@@ -44,17 +44,17 @@ msg_ok "Distribuição detectada: ${PRETTY_NAME:-$DISTRO}"
 msg_info "Garantindo dependências básicas do sistema..."
 case "$DISTRO" in
     manjaro|arch|endeavouros|biglinux)
-        pacman -Sy --noconfirm --needed python python-pip vnstat
+        pacman -Sy --noconfirm --needed python python-pip curl unzip vnstat
         ;;
     ubuntu|debian|linuxmint|pop)
         apt-get update -qq
-        apt-get install -y -qq python3 python3-pip python3-venv curl vnstat
+        apt-get install -y -qq python3 python3-pip python3-venv curl unzip vnstat
         ;;
     fedora|rhel|centos|rocky|almalinux)
-        dnf install -y -q python3 python3-pip vnstat
+        dnf install -y -q python3 python3-pip curl unzip vnstat
         ;;
     opensuse*|sles)
-        zypper --non-interactive install python3 python3-pip vnstat
+        zypper --non-interactive install python3 python3-pip curl unzip vnstat
         ;;
     *)
         msg_warn "Distribuição não identificada diretamente. Prosseguindo com verificações genéricas."

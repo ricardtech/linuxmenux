@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.9] - 27/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.645 linhas** de código em **94 arquivos-fonte** (`9.535` `.vue` · `7.542` `.py` · `7.610` `.css` · `2.668` `.js` · `272` `.sh` · `18` `.service`).
+
+### Corrigido
+- **Dependência `unzip` e `curl` ausente no instalador (`scripts/install.sh`)**: incluídos `unzip` e `curl` na instalação automática de pacotes básicos para `apt`, `pacman`, `dnf` e `zypper`, evitando o erro `error: unzip is required to install bun` em servidores Ubuntu/Debian limpos.
+
 ## [1.4.8] - 26/11/2026
 
 ### 📊 Métricas de Código
