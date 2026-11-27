@@ -32,7 +32,7 @@
       <div class="flex items-center justify-between pt-3 border-t border-zinc-800">
         <label class="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer">
           <input type="checkbox" v-model="dontShowAgain" class="rounded bg-zinc-900 border-zinc-700" />
-          <span>Não mostrar novamente na versão v{{ version }}</span>
+          <span>Não mostrar novidades automaticamente</span>
         </label>
         <button @click="dismissForVersion" class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold cursor-pointer">
           Entendido
@@ -43,7 +43,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { Sparkles } from 'lucide-vue-next'
 import BaseModal from './BaseModal.vue'
 import { APP_VERSION } from '../lib/version'
@@ -53,35 +53,49 @@ defineProps({
 })
 const emit = defineEmits(['close'])
 
-const version = APP_VERSION
+const version = ref(APP_VERSION)
 const dontShowAgain = ref(true)
 
-const highlights = [
+const highlights = ref([
   {
-    title: 'Paridade 1:1 Completa em Segurança & Configurações',
-    detail: 'Abas de Segurança (Autenticação, SSL/Cloudflare Tunnel, Tokens API + Swagger, Firewall, Fail2Ban com jails/IPs banidos e Lynis com PDF) e Configurações (Snippets, Otimizações, GitHub API e Notificações).',
+    title: 'Persistência Completa entre Atualizações (F5)',
+    detail: 'Recarregar qualquer aba (#admin-security, #hardware, #backup, #admin-logs, #admin-audit, #admin-settings) agora carrega imediatamente os dados reais e mantém seletores, filtros, toggles e ordem das abas salvos.',
   },
   {
-    title: 'Rede Real, Wi-Fi Preciso & Logo Oficial da Distro',
-    detail: 'Cabo Ethernet desconectado (sem IP) marcado corretamente como Desativado, velocidade real do Wi-Fi via iw dev, latência ICMP corrigida e logotipo oficial da distribuição.',
+    title: 'Auditoria Lynis Assíncrona (Sem Timeout Cloudflare)',
+    detail: 'Execução da auditoria Lynis em segundo plano com polling em /api/security/lynis/status e fallback via /var/log/lynis-report.dat.',
   },
   {
-    title: 'Atualizações AUR & Auto-Atualização no Modal Info',
-    detail: 'Detecção de pacotes AUR (pamac checkupdates), verificação automática de novas releases no GitHub público e botão de atualização com 1 clique no modal Info.',
+    title: 'Deploy Rápido Multi-Distro & Filtro Free na IA',
+    detail: 'Frontend pré-compilado para deploy instantâneo em VPS, filtro rápido "Só Free" nos modelos de IA e controle definitivo de exibição do modal de novidades.',
   },
-  {
-    title: 'Telemetria 100% Linux/Docker (Sem /api/vms)',
-    detail: 'Coleta em lote de estatísticas reais de CPU, Memória, E/S de disco e E/S de rede dos containers Docker e Dokploy sem chamadas de VM.',
-  },
-]
+])
+
+onMounted(async () => {
+  try {
+    const res = await fetch('/api/proxmenux/release-notes')
+    if (res.ok) {
+      const data = await res.json()
+      if (data.version) version.value = data.version
+      if (Array.isArray(data.items) && data.items.length) {
+        highlights.value = data.items
+      }
+    }
+  } catch {
+    // fallback para highlights embutidos
+  }
+})
 
 function dismissForVersion() {
-  if (dontShowAgain.value) {
-    try {
-      localStorage.setItem('linuxmenux-last-seen-version', version)
-    } catch {
-      // ignore
+  try {
+    localStorage.setItem('linuxmenux-last-seen-version', version.value)
+    if (dontShowAgain.value) {
+      localStorage.setItem('linuxmenux-release-notes-disabled', '1')
+    } else {
+      localStorage.removeItem('linuxmenux-release-notes-disabled')
     }
+  } catch {
+    // ignore
   }
   emit('close')
 }

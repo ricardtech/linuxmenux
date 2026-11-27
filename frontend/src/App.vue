@@ -7,15 +7,25 @@
     <header class="border-b px-4 lg:px-6 py-2.5 sticky top-0 z-50 transition-colors"
       :class="isDarkTheme ? 'bg-[#1f1f23] border-zinc-800' : 'bg-white border-zinc-200'">
       <div class="container mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-4">
-        <!-- Logo & Branding (Linux Menux official SVG logo) -->
-        <div class="flex items-center gap-3 min-w-0">
-          <img src="/logo.svg" alt="Linux Menux - Monitor" class="w-9 h-9 rounded-lg shadow-lg shadow-orange-500/20 shrink-0" />
-          <div class="min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <h1 class="text-base font-bold text-white tracking-tight truncate">Linux Menux - Monitor</h1>
-              <span class="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded tabular-nums font-semibold">v{{ appUpdateInfo?.current_version || APP_VERSION }}</span>
+        <!-- Logo & Branding + Mobile Drawer Trigger -->
+        <div class="flex items-center justify-between gap-3 min-w-0">
+          <div class="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <button
+              @click="mobileMenuOpen = !mobileMenuOpen"
+              class="lg:hidden p-2 rounded-lg bg-zinc-800/80 hover:bg-zinc-700 border border-zinc-700/70 text-zinc-200 cursor-pointer shrink-0"
+              aria-label="Abrir menu lateral"
+            >
+              <X v-if="mobileMenuOpen" class="w-5 h-5" />
+              <Menu v-else class="w-5 h-5" />
+            </button>
+            <img src="/logo.svg" alt="Linux Menux - Monitor" class="w-8 h-8 sm:w-9 sm:h-9 rounded-lg shadow-lg shadow-orange-500/20 shrink-0" />
+            <div class="min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <h1 class="text-sm sm:text-base font-bold text-white tracking-tight truncate">Linux Menux - Monitor</h1>
+                <span class="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-1.5 py-0.5 rounded tabular-nums font-semibold">v{{ appUpdateInfo?.current_version || APP_VERSION }}</span>
+              </div>
+              <p class="text-[11px] sm:text-xs text-zinc-400 font-medium truncate">Painel do sistema {{ systemData.distro_name || 'Linux' }}</p>
             </div>
-            <p class="text-xs text-zinc-400 font-medium truncate">Painel do sistema {{ systemData.distro_name || 'Linux' }}</p>
           </div>
         </div>
 
@@ -100,8 +110,73 @@
       </div>
     </header>
 
-    <!-- Navigation Tabs Bar (Identical to ProxMenux: full-width grid-cols-7 pill container) -->
-    <nav class="px-4 lg:px-6 pt-3 pb-1 relative z-40">
+    <!-- Mobile Collapsible Side Drawer -->
+    <div v-if="mobileMenuOpen" class="fixed inset-0 z-50 lg:hidden flex">
+      <div class="fixed inset-0 bg-black/70 backdrop-blur-xs" @click="mobileMenuOpen = false"></div>
+      <aside class="relative w-72 max-w-[82vw] h-full bg-[#1b1b1f] border-r border-zinc-800 p-4 flex flex-col gap-1.5 overflow-y-auto shadow-2xl z-10">
+        <div class="flex items-center justify-between pb-3 mb-2 border-b border-zinc-800">
+          <div class="flex items-center gap-2">
+            <img src="/logo.svg" alt="Linux Menux" class="w-7 h-7 rounded-md" />
+            <span class="text-sm font-bold text-white">Menu</span>
+          </div>
+          <button @click="mobileMenuOpen = false" class="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 cursor-pointer">
+            <X class="w-5 h-5" />
+          </button>
+        </div>
+
+        <button @click="activeTab = 'overview'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'overview' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <LayoutDashboard class="w-4 h-4 shrink-0" /> Visão geral
+        </button>
+        <button @click="activeTab = 'apps'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'apps' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Grid3x3 class="w-4 h-4 shrink-0" /> Apps
+        </button>
+        <button @click="activeTab = 'containers'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'containers' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Boxes class="w-4 h-4 shrink-0" /> Containers
+        </button>
+
+        <div class="pt-2 mt-1 border-t border-zinc-800/80 text-[11px] uppercase tracking-wider text-zinc-500 px-3">Nó</div>
+        <button @click="activeTab = 'storage'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'storage' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <HardDrive class="w-4 h-4 shrink-0 text-blue-400" /> Armazenar
+        </button>
+        <button @click="activeTab = 'network-overview'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'network-overview' || activeTab === 'network' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Network class="w-4 h-4 shrink-0 text-emerald-400" /> Rede
+        </button>
+        <button @click="activeTab = 'network-flow'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'network-flow' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Share2 class="w-4 h-4 shrink-0 text-blue-400" /> Fluxo de Redes
+        </button>
+        <button @click="activeTab = 'hardware'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'hardware' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Cpu class="w-4 h-4 shrink-0 text-amber-400" /> Hardware
+        </button>
+
+        <div class="pt-2 mt-1 border-t border-zinc-800/80 text-[11px] uppercase tracking-wider text-zinc-500 px-3">Sistema</div>
+        <button @click="activeTab = 'backup'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'backup' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <DatabaseBackup class="w-4 h-4 shrink-0" /> Backup
+        </button>
+        <button @click="activeTab = 'terminal'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'terminal' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Terminal class="w-4 h-4 shrink-0" /> Terminal
+        </button>
+
+        <div class="pt-2 mt-1 border-t border-zinc-800/80 text-[11px] uppercase tracking-wider text-zinc-500 px-3">Administração</div>
+        <button @click="activeTab = 'admin-logs'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'admin-logs' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <FileText class="w-4 h-4 shrink-0" /> Registros
+        </button>
+        <button @click="activeTab = 'admin-security'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'admin-security' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <ShieldCheck class="w-4 h-4 shrink-0" /> Segurança
+        </button>
+        <button @click="activeTab = 'admin-audit'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'admin-audit' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <CheckCircle class="w-4 h-4 shrink-0" /> Auditoria
+        </button>
+        <button @click="activeTab = 'admin-settings'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'admin-settings' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Settings2 class="w-4 h-4 shrink-0" /> Configurações
+        </button>
+        <button @click="activeTab = 'admin-about'; mobileMenuOpen = false" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-left cursor-pointer" :class="activeTab === 'admin-about' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'">
+          <Info class="w-4 h-4 shrink-0" /> Sobre
+        </button>
+      </aside>
+    </div>
+
+    <!-- Navigation Tabs Bar (Desktop) -->
+    <nav class="hidden lg:block px-4 lg:px-6 pt-3 pb-1 relative z-40">
       <div class="container mx-auto">
         <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 w-full bg-[#242424] border border-zinc-800 rounded-xl p-1 gap-1">
         <!-- Tab: Visão Geral -->
@@ -535,7 +610,8 @@ import {
   LayoutDashboard, Grid3x3, Boxes, Network, HardDrive, DatabaseBackup,
   Terminal, Settings2, Server, ChevronDown, ChevronRight, Info, Clock,
   RefreshCw, Moon, Sun, Activity, Wifi, Cpu, Thermometer, Plus, ExternalLink,
-  Share2, Sparkles, CheckCircle, ShieldCheck, Send, MessageSquare, Search, Trash2
+  Share2, Sparkles, CheckCircle, ShieldCheck, Send, MessageSquare, Search, Trash2,
+  Menu, X, FileText
 } from 'lucide-vue-next'
 import {
   Chart, LineController, LineElement, PointElement, LinearScale,
@@ -598,7 +674,10 @@ function checkFirstVisitModals() {
   try {
     if (!localStorage.getItem('linuxmenux-onboarding-done')) {
       onboardingOpen.value = true
-    } else if (localStorage.getItem('linuxmenux-last-seen-version') !== APP_VERSION) {
+    } else if (
+      localStorage.getItem('linuxmenux-release-notes-disabled') !== '1' &&
+      localStorage.getItem('linuxmenux-last-seen-version') !== APP_VERSION
+    ) {
       releaseNotesOpen.value = true
     }
   } catch {}
@@ -673,6 +752,7 @@ if (typeof window !== 'undefined') {
 }
 const nodeMenuOpen = ref(false)
 const adminMenuOpen = ref(false)
+const mobileMenuOpen = ref(false)
 const loading = ref(false)
 const metricsLoading = ref(false)
 const netMetricsLoading = ref(false)
@@ -963,7 +1043,7 @@ async function triggerLynisAudit() {
       alert(j.message || j.detail || 'Erro ao iniciar auditoria Lynis.')
       return
     }
-    for (let i = 0; i < 120; i++) {
+    for (let i = 0; i < 240; i++) {
       await new Promise((r) => setTimeout(r, 2000))
       const stRes = await fetch('/api/security/lynis/status').catch(() => null)
       if (!stRes || !stRes.ok) continue
@@ -2301,8 +2381,12 @@ async function startDashboardSession() {
   await nextTick()
   initCharts()
   await loadDataForTab(activeTab.value)
-  setInterval(fetchTelemetry, 3000)
-  setInterval(fetchFlowData, 2000)
+  setInterval(() => {
+    if (authGate.value === 'ready') fetchTelemetry()
+  }, 3000)
+  setInterval(() => {
+    if (authGate.value === 'ready') fetchFlowData()
+  }, 2000)
   setInterval(() => {
     if (authGate.value !== 'ready') return
     updateMetricsCharts()

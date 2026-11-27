@@ -3,12 +3,16 @@ Linux Menux Simple & Robust Authentication Manager
 Handles password hashing, token generation, profile storage, and login/setup flows.
 """
 
+import base64
 import hashlib
 import hmac
 import json
 import os
 import secrets
+import struct
 import time
+import urllib.parse
+import urllib.request
 from typing import Dict, Any, Optional, Tuple
 
 from core.paths import get_persistent_data_dir
@@ -118,6 +122,72 @@ def verify_jwt(token: str) -> Optional[str]:
         sig = hmac.new(key.encode("utf-8"), signing_input.encode("utf-8"), hashlib.sha256).digest()
         import base64
         calc_sig = base64.urlsafe_b64encode(sig).decode("utf-8").rstrip("=")
+        if not hmac.compare_digest(calc_sig, parts[2]):
+            return None
+        padded = parts[1] + "=" * (-len(parts[1]) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("utf-8")).decode("utf-8"))
+        if payload.get("exp", 0) < time.time():
+            return None
+        return payload.get("username")
+    except Exception:
+        return None
+
+
+def generate_totp_secret(length: int = 16) -> str:
+    raw = secrets.token_bytes(20)
+    return base64.b32encode(raw).decode("ascii").rstrip("=")[:length]
+
+
+def _totp_at(secret: str, counter: int) -> str:
+    padded = secret.strip().upper() + "=" * (-len(secret.strip()) % 8)
+    key = base64.b32decode(padded, casefold=True)
+    msg = struct.pack(">Q", counter)
+    digest = hmac.new(key, msg, hashlib.sha1).digest()
+    offset = digest[-1] & 0x0F
+    code_int = (struct.unpack(">I", digest[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000
+    return f"{code_int:06d}"
+
+
+def verify_totp_code(secret: str, code: str, window: int = 1) -> bool:
+    clean = "".join(ch for ch in str(code or "") if ch.isdigit())
+    if len(clean) != 6 or not secret:
+        return False
+    now_step = int(time.time() // 30)
+    for offset in range(-window, window + 1):
+        try:
+            if hmac.compare_digest(_totp_at(secret, now_step + offset), clean):
+                return True
+        except Exception:
+            return False
+    return False
+
+
+def build_otpauth_uri(secret: str, username: str, issuer: str = "Linux Menux Monitor") -> str:
+    label = urllib.parse.quote(f"{issuer}:{username}")
+    q_issuer = urllib.parse.quote(issuer)
+    return f"otpauth://totp/{label}?secret={secret}&issuer={q_issuer}&algorithm=SHA1&digits=6&period=30"
+
+
+def send_telegram_2fa_code(bot_token: str, chat_id: str, code: str) -> Tuple[bool, str]:
+    token = str(bot_token or "").strip()
+    cid = str(chat_id or "").strip()
+    if not token or not cid:
+        return False, "Bot Token e Chat ID do Telegram são obrigatórios."
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = json.dumps({
+        "chat_id": cid,
+        "text": f"🔐 *Linux Menux - Monitor*\nSeu código de verificação 2FA é: `{code}`\n\nVálido por 5 minutos.",
+        "parse_mode": "Markdown",
+    }).encode("utf-8")
+    req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("ok"):
+                return True, "Código enviado para o Telegram."
+            return False, data.get("description") or "Falha na API do Telegram."
+    except Exception as exc:
+        return False, f"Erro ao enviar no Telegram: {exc}"
         if not hmac.compare_digest(calc_sig, parts[2]):
             return None
         # Check payload expiry

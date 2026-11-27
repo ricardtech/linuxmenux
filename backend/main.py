@@ -108,6 +108,10 @@ from core.auth import (
     generate_jwt,
     verify_jwt,
     verify_api_token,
+    generate_totp_secret,
+    verify_totp_code,
+    build_otpauth_uri,
+    send_telegram_2fa_code,
 )
 from api.terminal import issue_ticket, consume_ticket, handle_terminal_session
 
@@ -294,6 +298,10 @@ async def auth_setup(request: Request):
     }
 
 
+_PENDING_2FA_CHALLENGES: dict[str, dict] = {}
+_PENDING_TELEGRAM_SETUP: dict[str, dict] = {}
+
+
 @app.post("/api/auth/login")
 async def auth_login(request: Request):
     try:
@@ -303,13 +311,55 @@ async def auth_login(request: Request):
 
     username = str(body.get("username", "")).strip()
     password = str(body.get("password", ""))
+    code_2fa = str(body.get("code", "")).strip()
+    challenge_id = str(body.get("challenge_id", "")).strip()
 
     cfg = load_auth_config()
     if not cfg.get("configured"):
         token = generate_jwt(username or "admin")
         return {"success": True, "token": token, "username": username or "admin"}
 
+    # Etapa 2: validação de desafio 2FA existente
+    if challenge_id:
+        ch = _PENDING_2FA_CHALLENGES.get(challenge_id)
+        if not ch or ch.get("expires_at", 0) < time.time():
+            _PENDING_2FA_CHALLENGES.pop(challenge_id, None)
+            raise HTTPException(status_code=401, detail="Desafio 2FA expirado. Faça login novamente.")
+        valid_2fa = False
+        if cfg.get("totp_enabled") and cfg.get("totp_secret"):
+            if verify_totp_code(cfg["totp_secret"], code_2fa):
+                valid_2fa = True
+        if not valid_2fa and cfg.get("telegram_2fa_enabled") and ch.get("tg_code"):
+            if code_2fa == ch["tg_code"]:
+                valid_2fa = True
+        if not valid_2fa:
+            raise HTTPException(status_code=401, detail="Código 2FA inválido.")
+        _PENDING_2FA_CHALLENGES.pop(challenge_id, None)
+        token = generate_jwt(ch["username"])
+        return {"success": True, "token": token, "username": ch["username"]}
+
     if username == cfg.get("username") and verify_password(password, cfg.get("password_hash", ""), cfg.get("salt", "")):
+        totp_on = bool(cfg.get("totp_enabled") and cfg.get("totp_secret"))
+        tg_on = bool(cfg.get("telegram_2fa_enabled") and cfg.get("telegram_bot_token") and cfg.get("telegram_chat_id"))
+        if totp_on or tg_on:
+            cid = secrets.token_urlsafe(24)
+            tg_code = f"{secrets.randbelow(1_000_000):06d}" if tg_on else ""
+            _PENDING_2FA_CHALLENGES[cid] = {
+                "username": username,
+                "tg_code": tg_code,
+                "expires_at": time.time() + 300,
+            }
+            tg_sent = False
+            if tg_on:
+                ok_tg, _ = send_telegram_2fa_code(cfg["telegram_bot_token"], cfg["telegram_chat_id"], tg_code)
+                tg_sent = ok_tg
+            return {
+                "success": False,
+                "requires_2fa": True,
+                "challenge_id": cid,
+                "methods": {"totp": totp_on, "telegram": tg_on, "telegram_sent": tg_sent},
+                "message": "Informe o código 2FA para concluir o login.",
+            }
         token = generate_jwt(username)
         return {"success": True, "token": token, "username": username}
 
@@ -346,8 +396,154 @@ def get_auth_profile():
         "username": cfg.get("username", "AlaxRicard"),
         "display_name": cfg.get("display_name", cfg.get("username", "AlaxRicard")),
         "avatar_mtime": int(time.time()),
-        "totp_enabled": False,
+        "totp_enabled": bool(cfg.get("totp_enabled", False)),
+        "telegram_2fa_enabled": bool(cfg.get("telegram_2fa_enabled", False)),
     }
+
+
+@app.get("/api/auth/2fa/status")
+def get_2fa_status():
+    cfg = load_auth_config()
+    settings = get_settings()
+    notif = settings.get("notifications") or {}
+    tg_token = cfg.get("telegram_bot_token") or notif.get("telegram_token") or ""
+    tg_chat = cfg.get("telegram_chat_id") or notif.get("telegram_chat_id") or ""
+    return {
+        "totp_enabled": bool(cfg.get("totp_enabled", False)),
+        "telegram_enabled": bool(cfg.get("telegram_2fa_enabled", False)),
+        "telegram_bot_token": tg_token,
+        "telegram_chat_id": tg_chat,
+        "active": bool(cfg.get("totp_enabled") or cfg.get("telegram_2fa_enabled")),
+    }
+
+
+@app.post("/api/auth/2fa/totp/setup")
+def setup_totp_2fa():
+    cfg = load_auth_config()
+    secret = generate_totp_secret()
+    cfg["totp_pending_secret"] = secret
+    save_auth_config(cfg)
+    uri = build_otpauth_uri(secret, cfg.get("username") or "admin")
+    return {"success": True, "secret": secret, "otpauth_uri": uri}
+
+
+@app.post("/api/auth/2fa/totp/enable")
+async def enable_totp_2fa(request: Request):
+    body = await request.json()
+    code = str(body.get("code", "")).strip()
+    cfg = load_auth_config()
+    secret = cfg.get("totp_pending_secret") or cfg.get("totp_secret") or ""
+    if not secret or not verify_totp_code(secret, code):
+        raise HTTPException(status_code=400, detail="Código TOTP inválido. Confira o horário do aparelho e tente novamente.")
+    cfg["totp_secret"] = secret
+    cfg["totp_enabled"] = True
+    cfg.pop("totp_pending_secret", None)
+    save_auth_config(cfg)
+    return {"success": True, "totp_enabled": True}
+
+
+@app.post("/api/auth/2fa/totp/disable")
+def disable_totp_2fa():
+    cfg = load_auth_config()
+    cfg["totp_enabled"] = False
+    cfg.pop("totp_secret", None)
+    cfg.pop("totp_pending_secret", None)
+    save_auth_config(cfg)
+    return {"success": True, "totp_enabled": False}
+
+
+@app.post("/api/auth/2fa/telegram/test")
+async def test_telegram_2fa(request: Request):
+    body = await request.json()
+    cfg = load_auth_config()
+    settings = get_settings()
+    notif = settings.get("notifications") or {}
+    bot_token = str(body.get("bot_token") or cfg.get("telegram_bot_token") or notif.get("telegram_token") or "").strip()
+    chat_id = str(body.get("chat_id") or cfg.get("telegram_chat_id") or notif.get("telegram_chat_id") or "").strip()
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    ok, msg = send_telegram_2fa_code(bot_token, chat_id, code)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    _PENDING_TELEGRAM_SETUP["latest"] = {
+        "code": code,
+        "bot_token": bot_token,
+        "chat_id": chat_id,
+        "expires_at": time.time() + 300,
+    }
+    return {"success": True, "message": "Código de 6 dígitos enviado para o seu Telegram!"}
+
+
+@app.post("/api/auth/2fa/telegram/enable")
+async def enable_telegram_2fa(request: Request):
+    body = await request.json()
+    code = str(body.get("code", "")).strip()
+    pending = _PENDING_TELEGRAM_SETUP.get("latest")
+    if not pending or pending.get("expires_at", 0) < time.time():
+        raise HTTPException(status_code=400, detail="Código expirado. Envie um novo código de teste.")
+    if code != pending.get("code"):
+        raise HTTPException(status_code=400, detail="Código de verificação incorreto.")
+    cfg = load_auth_config()
+    cfg["telegram_2fa_enabled"] = True
+    cfg["telegram_bot_token"] = pending["bot_token"]
+    cfg["telegram_chat_id"] = pending["chat_id"]
+    save_auth_config(cfg)
+    _PENDING_TELEGRAM_SETUP.pop("latest", None)
+    return {"success": True, "telegram_enabled": True}
+
+
+@app.post("/api/auth/2fa/telegram/disable")
+def disable_telegram_2fa():
+    cfg = load_auth_config()
+    cfg["telegram_2fa_enabled"] = False
+    save_auth_config(cfg)
+    return {"success": True, "telegram_enabled": False}
+
+
+@app.post("/api/auth/2fa/resend")
+async def resend_2fa_telegram(request: Request):
+    body = await request.json()
+    cid = str(body.get("challenge_id", "")).strip()
+    ch = _PENDING_2FA_CHALLENGES.get(cid)
+    cfg = load_auth_config()
+    if not ch or ch.get("expires_at", 0) < time.time():
+        raise HTTPException(status_code=400, detail="Sessão 2FA expirada.")
+    if not (cfg.get("telegram_2fa_enabled") and cfg.get("telegram_bot_token") and cfg.get("telegram_chat_id")):
+        raise HTTPException(status_code=400, detail="2FA via Telegram não está ativo.")
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    ch["tg_code"] = code
+    ch["expires_at"] = time.time() + 300
+    ok, msg = send_telegram_2fa_code(cfg["telegram_bot_token"], cfg["telegram_chat_id"], code)
+    if not ok:
+        raise HTTPException(status_code=400, detail=msg)
+    return {"success": True, "message": "Novo código enviado para o Telegram."}
+
+
+@app.get("/api/proxmenux/release-notes")
+def get_release_notes():
+    """Lê a versão mais recente do CHANGELOG.md para exibir novidades sempre atualizadas."""
+    candidates = [
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "CHANGELOG.md"),
+        "/usr/local/share/linuxmenux/CHANGELOG.md",
+    ]
+    for path in candidates:
+        if os.path.isfile(path):
+            try:
+                with open(path, "r", encoding="utf-8") as fh:
+                    text = fh.read()
+                m = re.search(r"^##\s+\[([^\]]+)\][^\n]*\n(.*?)(?=\n##\s+\[|\Z)", text, re.M | re.S)
+                if m:
+                    ver = m.group(1).strip()
+                    block = m.group(2)
+                    items = []
+                    for line in block.splitlines():
+                        bm = re.match(r"^\s*-\s+\*\*(.+?)\*\*\s*:\s*(.+)$", line)
+                        if bm and "Total" not in bm.group(1):
+                            items.append({"title": bm.group(1).strip(), "detail": bm.group(2).strip()})
+                    if items:
+                        return {"version": ver, "items": items[:6]}
+            except Exception:
+                pass
+    return {"version": "", "items": []}
 
 
 @app.put("/api/auth/profile")
@@ -2243,7 +2439,10 @@ def api_get_optimizations():
         ("docker", "Docker Engine", "docker", "Containerização e orquestração de stacks"),
         ("vnstat", "vnStat Traffic Daemon", "vnstat", "Persistência de tráfego 24h entre reinícios"),
         ("journald", "Systemd Journal", "journalctl", "Coleta e auditoria de logs do sistema"),
-        ("ufw", "UFW Firewall", "ufw", "Gerenciamento de regras de entrada e saída"),
+        ("ufw", "UFW Firewall", "ufw", "Gerenciamento simplificado de firewall (Uncomplicated Firewall)"),
+        ("firewalld", "firewalld", "firewall-cmd", "Daemon dinâmico de firewall por zonas (RHEL/Fedora/Debian)"),
+        ("nftables", "nftables", "nft", "Subsistema moderno de filtragem de pacotes do kernel Linux"),
+        ("iptables", "iptables", "iptables", "Firewall clássico de tabelas e regras Netfilter (INPUT/FORWARD)"),
         ("fail2ban", "Fail2Ban IPS", "fail2ban-client", "Proteção automática contra força bruta"),
         ("lynis", "Lynis Security Audit", "lynis", "Auditoria contínua de hardening Linux"),
         ("tailscale", "Tailscale Mesh VPN", "tailscale", "Gateway seguro ponto-a-ponto"),
@@ -2342,10 +2541,13 @@ def get_sec_fail2ban_act():
             continue
         m = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}).*?\[([^\]]+)\]\s+(Ban|Unban|Found)\s+([0-9a-fA-F.:]+)", s)
         if m:
+            act_map = {"Ban": "Banido", "Unban": "Desbanido", "Found": "Detectado"}
+            raw_act = m.group(3)
             events.append({
                 "timestamp": m.group(1),
                 "jail": m.group(2),
-                "action": m.group(3),
+                "action": act_map.get(raw_act, raw_act),
+                "action_raw": raw_act,
                 "ip": m.group(4),
                 "raw": s,
             })

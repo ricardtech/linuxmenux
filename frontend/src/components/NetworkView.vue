@@ -176,8 +176,8 @@
         </div>
       </div>
 
-      <div class="bg-[#151518] border border-zinc-800/80 rounded-xl p-6 overflow-x-auto min-h-[460px] flex items-center justify-center relative">
-        <svg viewBox="0 0 1000 420" class="w-full max-w-5xl h-auto select-none">
+      <div class="bg-[#151518] border border-zinc-800/80 rounded-xl p-3 sm:p-6 overflow-x-auto min-h-[420px] flex items-center justify-center relative">
+        <svg :viewBox="`0 0 1000 ${svgHeight}`" class="w-full min-w-[680px] max-w-5xl h-auto select-none">
           <defs>
             <filter id="glow-orange" x="-20%" y="-20%" width="140%" height="140%">
               <feGaussianBlur stdDeviation="6" result="blur" />
@@ -188,40 +188,39 @@
               <feComposite in="SourceGraphic" in2="blur" operator="over" />
             </filter>
           </defs>
-          <path d="M 120 120 C 220 120, 220 210, 300 210" :class="primaryNicUp ? 'nf-beam-base-rx' : 'stroke-zinc-800 fill-none'" stroke-width="3" />
-          <path v-if="primaryNicUp" d="M 120 120 C 220 120, 220 210, 300 210" class="nf-beam-rx" stroke-width="3" />
-          <path v-if="secondaryNic" d="M 120 210 L 300 210" :class="secondaryNicUp ? 'nf-beam-base-tx' : 'stroke-zinc-800/70 fill-none'" stroke-width="2.5" stroke-dasharray="4 4" />
-          <path v-if="secondaryNic && secondaryNicUp" d="M 120 210 L 300 210" class="nf-beam-tx" stroke-width="3" />
-          <path d="M 300 210 C 380 210, 380 140, 480 140" class="nf-beam-base-rx" stroke-width="3" />
-          <path d="M 300 210 C 380 210, 380 140, 480 140" class="nf-beam-rx" stroke-width="3" />
-          <path d="M 300 210 C 380 210, 380 280, 480 280" class="nf-beam-base-tx" stroke-width="3" />
-          <path d="M 300 210 C 380 210, 380 280, 480 280" class="nf-beam-tx" stroke-width="3" />
-          <path d="M 480 140 C 580 140, 580 90, 720 90" class="nf-beam-base-rx" stroke-width="3" />
-          <path d="M 480 140 C 580 140, 580 90, 720 90" class="nf-beam-rx" stroke-width="3" />
-          <path d="M 480 140 C 580 140, 580 200, 720 200" class="nf-beam-base-tx" stroke-width="3" />
-          <path d="M 480 140 C 580 140, 580 200, 720 200" class="nf-beam-tx" stroke-width="3" />
-          <path d="M 480 280 C 580 280, 580 320, 720 320" class="nf-beam-base-rx" stroke-width="3" />
-          <path d="M 480 280 C 580 280, 580 320, 720 320" class="nf-beam-rx" stroke-width="3" />
+          <path :d="`M 120 ${svgHostY - 70} C 210 ${svgHostY - 70}, 210 ${svgHostY}, 300 ${svgHostY}`" :class="primaryNicUp ? 'nf-beam-base-rx' : 'stroke-zinc-800 fill-none'" stroke-width="3" />
+          <path v-if="primaryNicUp" :d="`M 120 ${svgHostY - 70} C 210 ${svgHostY - 70}, 210 ${svgHostY}, 300 ${svgHostY}`" class="nf-beam-rx" stroke-width="3" />
+          <path v-if="secondaryNic" :d="`M 120 ${svgHostY + 40} L 300 ${svgHostY}`" :class="secondaryNicUp ? 'nf-beam-base-tx' : 'stroke-zinc-800/70 fill-none'" stroke-width="2.5" stroke-dasharray="4 4" />
+          <path v-if="secondaryNic && secondaryNicUp" :d="`M 120 ${svgHostY + 40} L 300 ${svgHostY}`" class="nf-beam-tx" stroke-width="3" />
 
-          <g transform="translate(120, 120)">
+          <!-- Host -> Bridges -->
+          <template v-for="(br, bIdx) in svgBridges" :key="`br-path-${br.id}`">
+            <path :d="`M 300 ${svgHostY} C 390 ${svgHostY}, 390 ${br.y}, 490 ${br.y}`" :class="bIdx % 2 === 0 ? 'nf-beam-base-rx' : 'nf-beam-base-tx'" stroke-width="3" />
+            <path :d="`M 300 ${svgHostY} C 390 ${svgHostY}, 390 ${br.y}, 490 ${br.y}`" :class="bIdx % 2 === 0 ? 'nf-beam-rx' : 'nf-beam-tx'" stroke-width="3" />
+          </template>
+
+          <!-- Bridges -> TODOS os Containers filtrados -->
+          <template v-for="(c, cIdx) in svgConsumers" :key="`c-path-${c.id}`">
+            <path :d="`M 490 ${c.bridgeY} C 600 ${c.bridgeY}, 600 ${c.y}, 740 ${c.y}`" :class="cIdx % 2 === 0 ? 'nf-beam-base-rx' : 'nf-beam-base-tx'" stroke-width="2.4" />
+            <path v-if="!c.offline" :d="`M 490 ${c.bridgeY} C 600 ${c.bridgeY}, 600 ${c.y}, 740 ${c.y}`" :class="cIdx % 2 === 0 ? 'nf-beam-rx' : 'nf-beam-tx'" stroke-width="2.4" />
+          </template>
+
+          <g :transform="`translate(120, ${svgHostY - 70})`">
             <circle r="22" fill="#18181b" :stroke="primaryNicUp ? '#f59e0b' : '#52525b'" stroke-width="2.5" />
-            <!-- Wi-Fi / NIC icon -->
             <path d="M-8 -2a11 11 0 0 1 16 0M-5 2a7 7 0 0 1 10 0" fill="none" :stroke="primaryNicUp ? '#f59e0b' : '#71717a'" stroke-width="1.8" stroke-linecap="round" />
             <circle cx="0" cy="6" r="1.8" :fill="primaryNicUp ? '#f59e0b' : '#71717a'" />
-            <text y="36" text-anchor="middle" font-size="12" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ primaryNic?.name || networkData.default_interface || 'wlp3s0' }}</text>
+            <text y="36" text-anchor="middle" font-size="12" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ primaryNic?.name || networkData.default_interface || 'eth0' }}</text>
             <text y="50" text-anchor="middle" font-size="10" :fill="primaryNicUp ? '#10b981' : '#71717a'" font-family="monospace">{{ primaryNicUp ? (primaryNic?.speed || 'Ativa') : 'Desativada' }}</text>
           </g>
-          <g v-if="secondaryNic" transform="translate(120, 210)">
+          <g v-if="secondaryNic" :transform="`translate(120, ${svgHostY + 40})`">
             <circle r="22" fill="#18181b" :stroke="secondaryNicUp ? '#f59e0b' : '#52525b'" stroke-width="2.5" :opacity="secondaryNicUp ? 1 : 0.5" />
-            <!-- Ethernet port icon -->
             <rect x="-8" y="-7" width="16" height="14" rx="2" fill="none" :stroke="secondaryNicUp ? '#f59e0b' : '#71717a'" stroke-width="1.7" />
             <path d="M-4 -7v4M0 -7v4M4 -7v4" :stroke="secondaryNicUp ? '#f59e0b' : '#71717a'" stroke-width="1.5" stroke-linecap="round" />
-            <text y="36" text-anchor="middle" font-size="12" font-weight="bold" :fill="secondaryNicUp ? '#f4f4f5' : '#71717a'" font-family="monospace">{{ secondaryNic.name }}</text>
+            <text y="36" text-anchor="middle" font-size="12" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ secondaryNic.name }}</text>
             <text y="50" text-anchor="middle" font-size="10" :fill="secondaryNicUp ? '#10b981' : '#71717a'" font-family="monospace">{{ secondaryNicUp ? (secondaryNic.speed || 'Ativa') : 'Desativada' }}</text>
           </g>
-          <g transform="translate(300, 210)">
+          <g :transform="`translate(300, ${svgHostY})`">
             <circle r="34" fill="#18181b" stroke="#ea580c" stroke-width="3" filter="url(#glow-orange)" />
-            <!-- Distro Logo inside Central Host Node -->
             <image v-if="distroKey === 'biglinux'" :href="distroLogoUrl" x="-20" y="-20" width="40" height="40" preserveAspectRatio="xMidYMid meet" />
             <g v-else-if="distroKey === 'manjaro'">
               <path d="M-11 -11h12v6h-6v16h-6V-11zm14 0h8v22h-8V-11zm-7 8h5v14h-5V-3z" fill="#10b981" />
@@ -245,41 +244,23 @@
             <text y="50" text-anchor="middle" font-size="12" font-weight="bold" fill="#ffffff" font-family="monospace">{{ (systemData.distro_name || 'LINUX HOST').toUpperCase() }}</text>
             <text y="64" text-anchor="middle" font-size="10" fill="#ea580c" font-family="monospace">{{ flowData.host_rate || '0 B/s' }}</text>
           </g>
-          <g transform="translate(480, 140)">
-            <circle r="20" fill="#18181b" stroke="#06b6d4" stroke-width="2" filter="url(#glow-cyan)" />
-            <!-- Bridge switch icon -->
-            <circle cx="-6" cy="0" r="2.5" fill="#06b6d4" />
-            <circle cx="6" cy="0" r="2.5" fill="#06b6d4" />
-            <path d="M-3.5 0h7" stroke="#06b6d4" stroke-width="1.8" />
-            <text y="34" text-anchor="middle" font-size="11" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ (flowData.bridges && flowData.bridges[0] && flowData.bridges[0].id) || 'docker0' }}</text>
-            <text y="46" text-anchor="middle" font-size="10" fill="#06b6d4" font-family="monospace">{{ (flowData.bridges && flowData.bridges[0] && flowData.bridges[0].rate_formatted) || '0 B/s' }}</text>
-          </g>
-          <g transform="translate(480, 280)">
+
+          <!-- Bridges dinâmicas -->
+          <g v-for="br in svgBridges" :key="`br-node-${br.id}`" :transform="`translate(490, ${br.y})`">
             <circle r="20" fill="#18181b" stroke="#06b6d4" stroke-width="2" filter="url(#glow-cyan)" />
             <circle cx="-6" cy="0" r="2.5" fill="#06b6d4" />
             <circle cx="6" cy="0" r="2.5" fill="#06b6d4" />
             <path d="M-3.5 0h7" stroke="#06b6d4" stroke-width="1.8" />
-            <text y="34" text-anchor="middle" font-size="11" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ (flowData.bridges && flowData.bridges[1] && flowData.bridges[1].id) || 'br-dokploy' }}</text>
-            <text y="46" text-anchor="middle" font-size="10" fill="#06b6d4" font-family="monospace">{{ (flowData.bridges && flowData.bridges[1] && flowData.bridges[1].rate_formatted) || '0 B/s' }}</text>
+            <text y="34" text-anchor="middle" font-size="11" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ br.id }}</text>
+            <text y="46" text-anchor="middle" font-size="10" fill="#06b6d4" font-family="monospace">{{ br.rate_formatted || '0 B/s' }}</text>
           </g>
-          <g transform="translate(720, 90)">
-            <circle r="20" fill="#18181b" stroke="#a855f7" stroke-width="2" />
-            <!-- Container cube icon -->
-            <path d="M0 -8l8 4.5v9L0 10l-8-4.5v-9zM0 -8v9m0 0l8-4.5M0 1l-8-4.5" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-linejoin="round" />
-            <text y="34" text-anchor="middle" font-size="11" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ (flowConsumers[0] && flowConsumers[0].label) || 'dokploy' }}</text>
-            <text y="46" text-anchor="middle" font-size="10" fill="#a855f7" font-family="monospace">{{ (flowConsumers[0] && flowConsumers[0].rate_formatted) || '0 B/s' }}</text>
-          </g>
-          <g transform="translate(720, 200)">
-            <circle r="20" fill="#18181b" stroke="#06b6d4" stroke-width="2" />
-            <path d="M0 -8l8 4.5v9L0 10l-8-4.5v-9zM0 -8v9m0 0l8-4.5M0 1l-8-4.5" fill="none" stroke="#06b6d4" stroke-width="1.5" stroke-linejoin="round" />
-            <text y="34" text-anchor="middle" font-size="11" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ (flowConsumers[1] && flowConsumers[1].label) || 'traefik' }}</text>
-            <text y="46" text-anchor="middle" font-size="10" fill="#06b6d4" font-family="monospace">{{ (flowConsumers[1] && flowConsumers[1].rate_formatted) || '0 B/s' }}</text>
-          </g>
-          <g transform="translate(720, 320)">
-            <circle r="20" fill="#18181b" stroke="#a855f7" stroke-width="2" />
-            <path d="M0 -8l8 4.5v9L0 10l-8-4.5v-9zM0 -8v9m0 0l8-4.5M0 1l-8-4.5" fill="none" stroke="#a855f7" stroke-width="1.5" stroke-linejoin="round" />
-            <text y="34" text-anchor="middle" font-size="11" font-weight="bold" fill="#f4f4f5" font-family="monospace">{{ (flowConsumers[2] && flowConsumers[2].label) || 'custom-builder0' }}</text>
-            <text y="46" text-anchor="middle" font-size="10" fill="#a855f7" font-family="monospace">{{ (flowConsumers[2] && flowConsumers[2].rate_formatted) || '0 B/s' }}</text>
+
+          <!-- TODOS os Containers mapeados dinâmicos -->
+          <g v-for="(c, cIdx) in svgConsumers" :key="`c-node-${c.id}`" :transform="`translate(740, ${c.y})`">
+            <circle r="18" fill="#18181b" :stroke="c.offline ? '#52525b' : (cIdx % 2 === 0 ? '#a855f7' : '#06b6d4')" stroke-width="2" />
+            <path d="M0 -7l7 4v8L0 9l-7-4v-8zM0 -7v8m0 0l7-4M0 1l-7-4" fill="none" :stroke="c.offline ? '#71717a' : (cIdx % 2 === 0 ? '#a855f7' : '#06b6d4')" stroke-width="1.5" stroke-linejoin="round" />
+            <text x="28" y="-2" text-anchor="start" font-size="11" font-weight="bold" :fill="c.offline ? '#71717a' : '#f4f4f5'" font-family="monospace">{{ (c.label || c.name || '').slice(0, 28) }}</text>
+            <text x="28" y="12" text-anchor="start" font-size="10" :fill="c.offline ? '#52525b' : (cIdx % 2 === 0 ? '#a855f7' : '#06b6d4')" font-family="monospace">{{ c.rate_formatted || '0 B/s' }}</text>
           </g>
         </svg>
       </div>
@@ -443,6 +424,39 @@ const filteredFlowConsumers = computed(() => {
     if (q && !label.includes(q)) return false
     if (flowOnlyActive.value && !(c.rate_bytes > 0 || c.active)) return false
     return true
+  })
+})
+
+const svgHeight = computed(() => {
+  const n = Math.max(filteredFlowConsumers.value.length, (props.flowData?.bridges || []).length, 3)
+  return Math.max(420, 80 + n * 62)
+})
+
+const svgHostY = computed(() => Math.round(svgHeight.value / 2))
+
+const svgBridges = computed(() => {
+  const raw = (props.flowData?.bridges && props.flowData.bridges.length)
+    ? props.flowData.bridges
+    : [{ id: 'docker0', rate_formatted: '0 B/s' }]
+  const list = raw.slice(0, 6)
+  const step = svgHeight.value / (list.length + 1)
+  return list.map((b, idx) => ({
+    ...b,
+    y: Math.round(step * (idx + 1)),
+  }))
+})
+
+const svgConsumers = computed(() => {
+  const list = filteredFlowConsumers.value
+  const bridges = svgBridges.value
+  const step = (svgHeight.value - 60) / Math.max(1, list.length)
+  return list.map((c, idx) => {
+    const br = bridges.find((b) => b.id === c.bridge) || bridges[idx % bridges.length] || { y: svgHostY.value }
+    return {
+      ...c,
+      y: Math.round(36 + step * idx + step / 2),
+      bridgeY: br.y,
+    }
   })
 })
 

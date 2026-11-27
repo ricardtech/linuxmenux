@@ -70,12 +70,77 @@
           </div>
         </div>
 
-        <div class="flex items-center justify-between pt-3 border-t border-zinc-800/70 text-xs">
-          <div>
-            <span class="text-zinc-300 font-medium">Autenticação em Dois Fatores (2FA / TOTP)</span>
-            <p class="text-zinc-500">Camada extra com aplicativo autenticador (Google Authenticator / Authy).</p>
+        <div class="pt-3 border-t border-zinc-800/70 space-y-3 text-xs">
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-zinc-200 font-medium">Autenticação em Dois Fatores (2FA)</span>
+                <span class="px-2 py-0.5 rounded-full border font-semibold"
+                  :class="twoFaStatus.totp_enabled ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-zinc-900 border-zinc-700 text-zinc-400'">
+                  TOTP: {{ twoFaStatus.totp_enabled ? 'Ativo' : 'Desativado' }}
+                </span>
+                <span class="px-2 py-0.5 rounded-full border font-semibold"
+                  :class="twoFaStatus.telegram_enabled ? 'bg-blue-500/15 text-blue-400 border-blue-500/30' : 'bg-zinc-900 border-zinc-700 text-zinc-400'">
+                  Telegram Bot: {{ twoFaStatus.telegram_enabled ? 'Ativo' : 'Desativado' }}
+                </span>
+              </div>
+              <p class="text-zinc-500 mt-0.5">Proteja o login com aplicativo autenticador (Google Authenticator / Authy) ou recebendo código via Bot do Telegram.</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button v-if="!twoFaStatus.totp_enabled" @click="startTotpSetup" class="px-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 font-medium cursor-pointer">
+                Ativar TOTP (App)
+              </button>
+              <button v-else @click="disableTotp" class="px-3 py-1.5 rounded-lg bg-red-600/15 hover:bg-red-600/25 border border-red-500/30 text-red-400 font-medium cursor-pointer">
+                Desativar TOTP
+              </button>
+              <button v-if="!twoFaStatus.telegram_enabled" @click="showTg2faPanel = !showTg2faPanel; showTotpPanel = false" class="px-3 py-1.5 rounded-lg border border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 font-medium cursor-pointer">
+                Ativar via Telegram Bot
+              </button>
+              <button v-else @click="disableTelegram2fa" class="px-3 py-1.5 rounded-lg bg-red-600/15 hover:bg-red-600/25 border border-red-500/30 text-red-400 font-medium cursor-pointer">
+                Desativar Telegram 2FA
+              </button>
+            </div>
           </div>
-          <span class="px-2.5 py-0.5 rounded-full border bg-zinc-900 border-zinc-700 text-zinc-400">SQLite Local · Protegido via JWT</span>
+
+          <div v-if="twoFaMsg" class="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300">{{ twoFaMsg }}</div>
+          <div v-if="twoFaErr" class="p-2.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300">{{ twoFaErr }}</div>
+
+          <!-- Painel TOTP -->
+          <div v-if="showTotpPanel" class="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 space-y-3">
+            <div class="font-semibold text-white">Configurar Aplicativo Autenticador (TOTP)</div>
+            <p class="text-zinc-400">Adicione a chave secreta abaixo no Google Authenticator, Authy ou Bitwarden e digite o código de 6 dígitos gerado:</p>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 font-mono text-emerald-300 select-all">{{ totpSecret }}</code>
+              <button @click="copyToken(totpSecret)" class="px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 cursor-pointer">Copiar</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <input v-model="totpVerifyCode" type="text" inputmode="numeric" maxlength="6" placeholder="Código 6 dígitos (ex: 123456)" class="w-56 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              <button @click="confirmTotpEnable" class="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold cursor-pointer">Verificar e Ativar</button>
+              <button @click="showTotpPanel = false" class="px-3 py-2 rounded-md border border-zinc-700 text-zinc-400 hover:text-white cursor-pointer">Cancelar</button>
+            </div>
+          </div>
+
+          <!-- Painel Telegram Bot 2FA -->
+          <div v-if="showTg2faPanel" class="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 space-y-3">
+            <div class="font-semibold text-white">Configurar 2FA via Bot do Telegram</div>
+            <p class="text-zinc-400">Informe o Token do Bot (@BotFather) e seu Chat ID para receber o código de login diretamente no Telegram.</p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-zinc-400 mb-1">Bot Token</label>
+                <input v-model="tg2faBotToken" type="text" placeholder="123456789:ABCdef..." class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              </div>
+              <div>
+                <label class="block text-zinc-400 mb-1">Chat ID</label>
+                <input v-model="tg2faChatId" type="text" placeholder="123456789 ou -100..." class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button @click="sendTg2faTestCode" class="px-3.5 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold cursor-pointer">Enviar Código de Teste</button>
+              <input v-model="tg2faVerifyCode" type="text" inputmode="numeric" maxlength="6" placeholder="Código recebido (6 dígitos)" class="w-56 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              <button @click="confirmTg2faEnable" class="px-4 py-2 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-semibold cursor-pointer">Confirmar e Ativar</button>
+              <button @click="showTg2faPanel = false" class="px-3 py-2 rounded-md border border-zinc-700 text-zinc-400 hover:text-white cursor-pointer">Cancelar</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -712,7 +777,7 @@
               <div class="flex items-center gap-2.5 min-w-0">
                 <span
                   class="px-2 py-0.5 rounded font-semibold uppercase text-[11px] border shrink-0"
-                  :class="ev.action === 'Ban' ? 'bg-red-500/10 border-red-500/30 text-red-400' : (ev.action === 'Unban' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')"
+                  :class="(ev.action_raw === 'Ban' || ev.action === 'Banido') ? 'bg-red-500/10 border-red-500/30 text-red-400' : ((ev.action_raw === 'Unban' || ev.action === 'Desbanido') ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' : 'bg-amber-500/10 border-amber-500/30 text-amber-400')"
                 >
                   {{ ev.action }}
                 </span>
@@ -895,6 +960,16 @@ const showAuthPassConfirm = ref(false)
 const showPasswordForm = ref(false)
 const authMsg = ref('')
 const authErr = ref('')
+const twoFaStatus = ref({ totp_enabled: false, telegram_enabled: false, telegram_bot_token: '', telegram_chat_id: '' })
+const showTotpPanel = ref(false)
+const showTg2faPanel = ref(false)
+const totpSecret = ref('')
+const totpVerifyCode = ref('')
+const tg2faBotToken = ref('')
+const tg2faChatId = ref('')
+const tg2faVerifyCode = ref('')
+const twoFaMsg = ref('')
+const twoFaErr = ref('')
 const tokenCopied = ref(false)
 const originUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:8008'
 
@@ -966,10 +1041,11 @@ const filteredFwRules = computed(() => {
 
 onMounted(async () => {
   try {
-    const [authRes, sslRes, setRes] = await Promise.all([
+    const [authRes, sslRes, setRes, tfaRes] = await Promise.all([
       fetch('/api/auth/status'),
       fetch('/api/ssl/status'),
       fetch('/api/settings'),
+      fetchApi('/api/auth/2fa/status'),
     ])
     if (authRes.ok) {
       const d = await authRes.json()
@@ -981,8 +1057,109 @@ onMounted(async () => {
       const s = await setRes.json()
       trustedIps.value = s.fail2ban_trusted_ips || []
     }
+    if (tfaRes.ok) {
+      const tfa = await tfaRes.json()
+      twoFaStatus.value = tfa
+      if (!tg2faBotToken.value && tfa.telegram_bot_token) tg2faBotToken.value = tfa.telegram_bot_token
+      if (!tg2faChatId.value && tfa.telegram_chat_id) tg2faChatId.value = tfa.telegram_chat_id
+    }
   } catch {}
 })
+
+async function refresh2faStatus() {
+  try {
+    const res = await fetchApi('/api/auth/2fa/status')
+    if (res.ok) twoFaStatus.value = await res.json()
+  } catch {}
+}
+
+async function startTotpSetup() {
+  twoFaMsg.value = ''
+  twoFaErr.value = ''
+  showTg2faPanel.value = false
+  const res = await fetchApi('/api/auth/2fa/totp/setup', { method: 'POST' })
+  if (res.ok) {
+    const d = await res.json()
+    totpSecret.value = d.secret || ''
+    showTotpPanel.value = true
+  } else {
+    twoFaErr.value = 'Erro ao gerar chave TOTP.'
+  }
+}
+
+async function confirmTotpEnable() {
+  twoFaMsg.value = ''
+  twoFaErr.value = ''
+  const res = await fetchApi('/api/auth/2fa/totp/enable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: totpVerifyCode.value.trim() }),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    twoFaErr.value = d.detail || 'Código TOTP inválido.'
+    return
+  }
+  showTotpPanel.value = false
+  totpVerifyCode.value = ''
+  twoFaMsg.value = '2FA via Aplicativo (TOTP) ativado com sucesso!'
+  await refresh2faStatus()
+}
+
+async function disableTotp() {
+  twoFaMsg.value = ''
+  twoFaErr.value = ''
+  const res = await fetchApi('/api/auth/2fa/totp/disable', { method: 'POST' })
+  if (res.ok) {
+    twoFaMsg.value = '2FA via TOTP desativado.'
+    await refresh2faStatus()
+  }
+}
+
+async function sendTg2faTestCode() {
+  twoFaMsg.value = ''
+  twoFaErr.value = ''
+  const res = await fetchApi('/api/auth/2fa/telegram/test', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bot_token: tg2faBotToken.value.trim(), chat_id: tg2faChatId.value.trim() }),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    twoFaErr.value = d.detail || 'Falha ao enviar código no Telegram.'
+    return
+  }
+  twoFaMsg.value = d.message || 'Código enviado! Confira seu Telegram.'
+}
+
+async function confirmTg2faEnable() {
+  twoFaMsg.value = ''
+  twoFaErr.value = ''
+  const res = await fetchApi('/api/auth/2fa/telegram/enable', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ code: tg2faVerifyCode.value.trim() }),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    twoFaErr.value = d.detail || 'Código de verificação inválido.'
+    return
+  }
+  showTg2faPanel.value = false
+  tg2faVerifyCode.value = ''
+  twoFaMsg.value = '2FA via Bot do Telegram ativado com sucesso!'
+  await refresh2faStatus()
+}
+
+async function disableTelegram2fa() {
+  twoFaMsg.value = ''
+  twoFaErr.value = ''
+  const res = await fetchApi('/api/auth/2fa/telegram/disable', { method: 'POST' })
+  if (res.ok) {
+    twoFaMsg.value = '2FA via Telegram desativado.'
+    await refresh2faStatus()
+  }
+}
 
 async function saveAuthCredentials() {
   authMsg.value = ''

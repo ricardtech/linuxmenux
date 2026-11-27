@@ -365,9 +365,15 @@ def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
         _run_cmd(["firewall-cmd", "--reload"], timeout=10)
         return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
-    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
-        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
-        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+    if engine_id == "iptables" and shutil.which("iptables"):
+        if ":" in rule_ref:
+            chain, num = rule_ref.split(":", 1)
+            if chain in ("INPUT", "FORWARD", "OUTPUT", "DOCKER-USER") and num.isdigit():
+                proc = _run_cmd(["iptables", "-D", chain, num], timeout=10)
+                return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+        elif rule_ref.isdigit():
+            proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+            return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
     return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
 
@@ -620,10 +626,13 @@ def _inspect_firewall_smart() -> Dict[str, Any]:
 
     # 4. Verifica iptables se nenhum dos gerenciadores acima está ativo
     if not fw_active and "iptables" in installed_engines:
-        p = _run_cmd(["iptables", "-L", "INPUT", "-n", "--line-numbers"], timeout=5)
-        if p.returncode == 0:
+        iptables_chains = ["INPUT", "FORWARD", "OUTPUT", "DOCKER-USER"]
+        for chain in iptables_chains:
+            p = _run_cmd(["iptables", "-L", chain, "-n", "--line-numbers"], timeout=5)
+            if p.returncode != 0:
+                continue
             raw_lines = p.stdout.splitlines()
-            if raw_lines and "policy " in raw_lines[0]:
+            if chain == "INPUT" and raw_lines and "policy " in raw_lines[0]:
                 m_pol = re.search(r"policy\s+(\w+)", raw_lines[0])
                 if m_pol:
                     default_policy = m_pol.group(1)
@@ -637,22 +646,25 @@ def _inspect_firewall_smart() -> Dict[str, Any]:
                     target_act = parts[1]
                     proto = parts[2]
                     src = parts[4]
+                    dst = parts[5] if len(parts) >= 6 else "0.0.0.0/0"
                     dport_m = re.search(r"dpt:(\d+)", s)
-                    target_label = f"{dport_m.group(1)}/{proto}" if dport_m else f"{proto} ({src})"
+                    dports_m = re.search(r"dports\s+([0-9,:]+)", s)
+                    port_str = dport_m.group(1) if dport_m else (dports_m.group(1) if dports_m else "")
+                    target_label = f"[{chain}] {port_str}/{proto}" if port_str else f"[{chain}] {proto} ({src} -> {dst})"
                     action_norm = "deny" if target_act in ("DROP", "REJECT") else "allow"
-                    fw_rules.append(s)
+                    fw_rules.append(f"[{chain}] {s}")
                     parsed_rules.append({
-                        "number": num,
+                        "number": f"{chain}:{num}",
                         "target": target_label,
                         "action": action_norm,
                         "action_label": target_act,
                         "from_ip": src,
-                        "raw": s,
+                        "raw": f"[{chain}] {s}",
                     })
-            if parsed_rules:
-                fw_engine = "iptables"
-                fw_engine_id = "iptables"
-                fw_active = True
+        if parsed_rules or default_policy:
+            fw_engine = "iptables"
+            fw_engine_id = "iptables"
+            fw_active = bool(parsed_rules or (default_policy and default_policy != "ACCEPT"))
 
     # 5. Se nenhum motor está ativo, identifica o melhor motor instalado pronto para uso
     if not fw_active and fw_engine_id == "none":
@@ -913,7 +925,7 @@ def run_lynis_audit() -> Dict[str, Any]:
             input="\n",
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=420,
         )
         out = (proc.stdout or "") + "\n" + (proc.stderr or "")
         hardening = "-"
@@ -965,6 +977,27 @@ def run_lynis_audit() -> Dict[str, Any]:
         reports.insert(0, report)
         _write_json("lynis_reports.json", reports[:20])
         return {"success": True, "report": report}
+    except subprocess.TimeoutExpired:
+        report_dat = "/var/log/lynis-report.dat"
+        if os.path.isfile(report_dat):
+            try:
+                with open(report_dat, "r", encoding="utf-8", errors="ignore") as fh:
+                    dat = fh.read()
+                mh = re.search(r"^hardening_index=(\d+)", dat, re.M)
+                if mh:
+                    reports = _read_json("lynis_reports.json", [])
+                    report = {
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "hardening_index": mh.group(1),
+                        "warnings": len(re.findall(r"^warning\[\]=", dat, re.M)),
+                        "suggestions": len(re.findall(r"^suggestion\[\]=", dat, re.M)),
+                    }
+                    reports.insert(0, report)
+                    _write_json("lynis_reports.json", reports[:20])
+                    return {"success": True, "report": report}
+            except Exception:
+                pass
+        return {"success": False, "message": "Auditoria Lynis excedeu o tempo limite de 7 minutos."}
     except Exception as exc:
         return {"success": False, "message": str(exc)}
 
@@ -1075,9 +1108,15 @@ def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
         _run_cmd(["firewall-cmd", "--reload"], timeout=10)
         return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
-    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
-        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
-        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+    if engine_id == "iptables" and shutil.which("iptables"):
+        if ":" in rule_ref:
+            chain, num = rule_ref.split(":", 1)
+            if chain in ("INPUT", "FORWARD", "OUTPUT", "DOCKER-USER") and num.isdigit():
+                proc = _run_cmd(["iptables", "-D", chain, num], timeout=10)
+                return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+        elif rule_ref.isdigit():
+            proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+            return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
     return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
 
@@ -1487,9 +1526,15 @@ def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
         _run_cmd(["firewall-cmd", "--reload"], timeout=10)
         return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
-    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
-        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
-        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+    if engine_id == "iptables" and shutil.which("iptables"):
+        if ":" in rule_ref:
+            chain, num = rule_ref.split(":", 1)
+            if chain in ("INPUT", "FORWARD", "OUTPUT", "DOCKER-USER") and num.isdigit():
+                proc = _run_cmd(["iptables", "-D", chain, num], timeout=10)
+                return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+        elif rule_ref.isdigit():
+            proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+            return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
     return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
 
@@ -1907,9 +1952,15 @@ def delete_firewall_rule(rule_ref: str) -> Dict[str, Any]:
         _run_cmd(["firewall-cmd", "--reload"], timeout=10)
         return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
-    if engine_id == "iptables" and shutil.which("iptables") and rule_ref.isdigit():
-        proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
-        return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+    if engine_id == "iptables" and shutil.which("iptables"):
+        if ":" in rule_ref:
+            chain, num = rule_ref.split(":", 1)
+            if chain in ("INPUT", "FORWARD", "OUTPUT", "DOCKER-USER") and num.isdigit():
+                proc = _run_cmd(["iptables", "-D", chain, num], timeout=10)
+                return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
+        elif rule_ref.isdigit():
+            proc = _run_cmd(["iptables", "-D", "INPUT", rule_ref], timeout=10)
+            return {"success": proc.returncode == 0, "output": (proc.stdout + proc.stderr).strip()}
 
     return {"success": False, "error": f"Remoção não suportada ou motor '{engine_id}' indisponível."}
 

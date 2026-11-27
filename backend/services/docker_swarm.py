@@ -31,11 +31,17 @@ class UnixSocketHTTPConnection(http.client.HTTPConnection):
 class DockerClient:
     """Lightweight Docker Engine, Compose & Swarm API client using the local Unix domain socket."""
     def __init__(self, socket_path: str = "/var/run/docker.sock"):
-        self.socket_path = socket_path
+        import os
+        candidates = [
+            os.environ.get("DOCKER_HOST", "").replace("unix://", ""),
+            socket_path,
+            "/run/docker.sock",
+        ]
+        self.socket_path = next((p for p in candidates if p and os.path.exists(p)), socket_path)
 
     def request(self, path: str, method: str = "GET", body: Optional[bytes] = None) -> Any:
         try:
-            conn = UnixSocketHTTPConnection(self.socket_path, timeout=5)
+            conn = UnixSocketHTTPConnection(self.socket_path, timeout=8)
             headers = {"Host": "localhost", "Accept": "application/json"}
             if body:
                 headers["Content-Type"] = "application/json"
@@ -244,10 +250,54 @@ def _collect_docker_cli_stats() -> Dict[str, Dict[str, Any]]:
         return {}
 
 
+def _list_containers_via_cli(all_containers: bool = True) -> List[Dict[str, Any]]:
+    docker_bin = shutil.which("docker")
+    if not docker_bin:
+        return []
+    cmd = [docker_bin, "ps", "--no-trunc", "--format", "{{json .}}"]
+    if all_containers:
+        cmd.insert(2, "-a")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=8)
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return []
+        items: List[Dict[str, Any]] = []
+        for line in proc.stdout.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            cid = row.get("ID", "")
+            labels_raw = row.get("Labels", "") or ""
+            labels: Dict[str, str] = {}
+            for pair in labels_raw.split(","):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    labels[k.strip()] = v.strip()
+            items.append({
+                "Id": cid,
+                "Names": [f"/{row.get('Names', cid[:12])}"],
+                "Image": row.get("Image", ""),
+                "State": (row.get("State") or "").lower() or ("running" if "Up" in (row.get("Status") or "") else "exited"),
+                "Status": row.get("Status", ""),
+                "Labels": labels,
+                "Created": 0,
+                "Ports": [],
+            })
+        return items
+    except Exception:
+        return []
+
+
 def list_containers(all_containers: bool = True) -> List[Dict[str, Any]]:
     """List all containers on the host with status, Dokploy metadata, live stats, and Traefik domains."""
     path = f"/containers/json?all={'true' if all_containers else 'false'}"
     raw = docker_cli.request(path)
+    if not isinstance(raw, list):
+        raw = _list_containers_via_cli(all_containers=all_containers)
     if not isinstance(raw, list):
         return []
 

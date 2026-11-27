@@ -2,6 +2,21 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.5.2] - 27/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **18.691 linhas** de código em **61 arquivos-fonte** (`10.031` `.vue` · `8.016` `.py` · `275` `.sh` · `194` `.js` · `157` `.css` · `18` `.service`).
+
+### Adicionado
+- **Autenticação em Dois Fatores (2FA) via Aplicativo TOTP & Bot do Telegram (`auth.py`, `main.py`, `SecurityView.vue`, `LoginView.vue`)**: opção real para ativar/desativar 2FA na aba Segurança, com geração de chave TOTP (Google Authenticator / Authy) e configuração de Bot Token + Chat ID do Telegram com envio de código de 6 dígitos no login e botão de reenvio.
+- **Menu lateral recolhível responsivo para celulares (`App.vue`)**: adicionado botão hambúrguer no cabeçalho e gaveta lateral (`<aside>`) em telas móveis (`< lg`) preparando a experiência para o futuro aplicativo mobile.
+
+### Corrigido
+- **Containers no SRV01BR e Topologia SVG completa (`docker_swarm.py`, `NetworkView.vue`)**: adicionado suporte a `DOCKER_HOST` / `/run/docker.sock` e fallback automático para `docker ps -a` quando o socket Unix falha, além de renderização dinâmica de **todos** os containers e bridges na topologia SVG do Fluxo de Redes.
+- **Regras completas do iptables, tradução Fail2Ban e outros Firewalls (`linux_ops.py`, `main.py`, `SecurityView.vue`)**: leitura de todas as chains do iptables (`INPUT`, `FORWARD`, `OUTPUT`, `DOCKER-USER`) com remoção por chain, tradução das ações do Fail2Ban (`Banido`, `Desbanido`, `Detectado`), inclusão de `firewalld`, `nftables` e `iptables` em Otimizações & Serviços, e bloqueio de polling `401 Unauthorized` antes do login.
+- **Modal "O que há de novo" definitivo e sempre atualizado (`App.vue`, `ReleaseNotesModal.vue`, `main.py`, `install.sh`)**: ao marcar *"Não mostrar novidades automaticamente"*, grava `linuxmenux-release-notes-disabled=1` no `localStorage` para não reaparecer em refreshes nem em futuras atualizações; agora o modal também carrega dinamicamente as notas reais da versão atual via `GET /api/proxmenux/release-notes`.
+- **Auditoria Lynis sem timeout de 180s (`linux_ops.py`, `App.vue`)**: timeout ampliado para `420s` (7 minutos) em segundo plano com aproveitamento automático de `/var/log/lynis-report.dat` caso já contenha `hardening_index`.
+
 ## [1.5.1] - 27/11/2026
 
 ### 📊 Métricas de Código
