@@ -900,19 +900,59 @@ def run_lynis_audit() -> Dict[str, Any]:
     if not lynis_bin:
         return {"success": False, "message": "Lynis não está instalado."}
     try:
-        proc = _run_cmd([lynis_bin, "audit", "system", "--quick", "--no-colors"], timeout=120)
+        # Evita bloqueio interativo do Lynis quando /usr/share/lynis tem dono diferente de root
+        if os.geteuid() == 0 and os.path.isdir("/usr/share/lynis"):
+            try:
+                subprocess.run(["chown", "-R", "0:0", "/usr/share/lynis"], capture_output=True, timeout=10)
+            except Exception:
+                pass
+
+        proc = subprocess.run(
+            [lynis_bin, "audit", "system", "--quick", "--no-colors"],
+            input="\n",
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        out = (proc.stdout or "") + "\n" + (proc.stderr or "")
         hardening = "-"
         warnings = 0
         suggestions = 0
-        m = re.search(r"Hardening index\s*:\s*(\d+)", proc.stdout)
+
+        m = re.search(r"Hardening index\s*:\s*(\d+)", out)
         if m:
             hardening = m.group(1)
-        mw = re.search(r"Warnings\s*\((\d+)\)", proc.stdout)
+        mw = re.search(r"Warnings\s*\((\d+)\)", out)
         if mw:
             warnings = int(mw.group(1))
-        ms = re.search(r"Suggestions\s*\((\d+)\)", proc.stdout)
+        ms = re.search(r"Suggestions\s*\((\d+)\)", out)
         if ms:
             suggestions = int(ms.group(1))
+
+        # Fallback confiável: lê /var/log/lynis-report.dat se existir
+        report_dat = "/var/log/lynis-report.dat"
+        if os.path.isfile(report_dat):
+            try:
+                with open(report_dat, "r", encoding="utf-8", errors="ignore") as fh:
+                    dat = fh.read()
+                if hardening == "-":
+                    mh = re.search(r"^hardening_index=(\d+)", dat, re.M)
+                    if mh:
+                        hardening = mh.group(1)
+                if warnings == 0:
+                    w_list = re.findall(r"^warning\[\]=", dat, re.M)
+                    if w_list:
+                        warnings = len(w_list)
+                if suggestions == 0:
+                    s_list = re.findall(r"^suggestion\[\]=", dat, re.M)
+                    if s_list:
+                        suggestions = len(s_list)
+            except Exception:
+                pass
+
+        if hardening == "-" and proc.returncode != 0:
+            err_msg = out.strip().splitlines()[-1] if out.strip() else f"Código {proc.returncode}"
+            return {"success": False, "message": f"Falha ao executar Lynis: {err_msg}"}
 
         reports = _read_json("lynis_reports.json", [])
         report = {

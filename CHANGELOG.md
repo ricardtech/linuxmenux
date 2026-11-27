@@ -2,6 +2,15 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.5.0] - 27/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.691 linhas** de código em **94 arquivos-fonte** (`9.539` `.vue` · `7.582` `.py` · `7.610` `.css` · `2.668` `.js` · `274` `.sh` · `18` `.service`).
+
+### Corrigido
+- **Auditoria de Segurança Lynis não gerava relatório (`linux_ops.py` & `App.vue`)**: corrigido o bloqueio interativo do Lynis (`[ Press ENTER to continue ]` por ownership diferente de root em `/usr/share/lynis`), adicionado `input="\n"` + fallback de leitura em `/var/log/lynis-report.dat`, timeout ampliado para `180s` e exibição explícita de erro no frontend.
+- **Deploy instantâneo em VPS sem Bun/npm (`.gitignore` & `scripts/install.sh`)**: `backend/static/` agora é versionado pré-compilado para que servidores como o `SRV01BR` instalem e atualizem em segundos sem depender de baixar Bun/npm ou compilar frontend no servidor.
+
 ## [1.4.9] - 27/11/2026
 
 ### 📊 Métricas de Código

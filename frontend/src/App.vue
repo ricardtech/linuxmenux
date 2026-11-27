@@ -946,7 +946,11 @@ async function installSecTool(tool) {
 async function triggerLynisAudit() {
   lynisRunning.value = true
   try {
-    await fetch('/api/security/lynis/run', { method: 'POST' })
+    const res = await fetch('/api/security/lynis/run', { method: 'POST' })
+    const j = await res.json().catch(() => ({}))
+    if (!res.ok || j.success === false) {
+      alert(j.message || j.detail || 'Erro ao executar auditoria Lynis.')
+    }
     await fetchSecurity()
   } finally { lynisRunning.value = false }
 }

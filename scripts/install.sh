@@ -78,7 +78,9 @@ mkdir -p /var/lib/linuxmenux /etc/linuxmenux /var/backups/linuxmenux
 # 3. Setup Project Structure & Build Frontend
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-if [ -d "${SCRIPT_DIR}/frontend" ] && [ "${LINUXMENUX_SKIP_BUILD:-0}" != "1" ]; then
+if [ -f "${SCRIPT_DIR}/backend/static/index.html" ] && [ "${LINUXMENUX_FORCE_BUILD:-0}" != "1" ]; then
+    msg_ok "Frontend pré-compilado detectado em backend/static/ (deploy rápido sem recompilação)."
+elif [ -d "${SCRIPT_DIR}/frontend" ] && [ "${LINUXMENUX_SKIP_BUILD:-0}" != "1" ]; then
     msg_info "Garantindo build atualizado do frontend Vue 3 (Bun)..."
     BUN_BIN=""
 
