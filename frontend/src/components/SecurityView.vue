@@ -870,7 +870,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { Lock, Key, Eye, EyeOff, ShieldCheck, Shield, ShieldAlert, Globe, FileSearch, Copy, Flame, RefreshCw, Power, Info, Plus, Trash2, X, Bug, AlertTriangle, Clock } from 'lucide-vue-next'
 import { fetchApi, setAuthToken } from '../lib/api-config'
 
@@ -902,7 +902,7 @@ const sslInfo = ref({ enabled: false })
 const sslLoading = ref(false)
 const sslMsg = ref('')
 
-const fwFilter = ref('all')
+const fwFilter = ref((() => { try { return localStorage.getItem('linuxmenux-fw-filter') || 'all' } catch { return 'all' } })())
 const fwSearch = ref('')
 const showAddFwModal = ref(false)
 const fwRefreshing = ref(false)
@@ -911,7 +911,9 @@ const fwNotice = ref('')
 const fwNoticeError = ref(false)
 const f2bTrustedInput = ref('')
 const trustedIps = ref([])
-const f2bActiveTab = ref('jails')
+const f2bActiveTab = ref((() => { try { return localStorage.getItem('linuxmenux-f2b-tab') || 'jails' } catch { return 'jails' } })())
+watch(fwFilter, (v) => { try { localStorage.setItem('linuxmenux-fw-filter', v) } catch {} })
+watch(f2bActiveTab, (v) => { try { localStorage.setItem('linuxmenux-f2b-tab', v) } catch {} })
 const f2bRefreshing = ref(false)
 const showAddTrustedModal = ref(false)
 const showF2bInstallModal = ref(false)

@@ -12,6 +12,7 @@ import shutil
 import secrets
 import subprocess
 import tarfile
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -968,6 +969,43 @@ def run_lynis_audit() -> Dict[str, Any]:
         return {"success": False, "message": str(exc)}
 
 
+_LYNIS_LOCK = threading.Lock()
+_LYNIS_JOB: Dict[str, Any] = {
+    "running": False,
+    "success": None,
+    "message": "",
+    "started_at": 0.0,
+    "finished_at": 0.0,
+}
+
+
+def _lynis_worker() -> None:
+    res = run_lynis_audit()
+    with _LYNIS_LOCK:
+        _LYNIS_JOB["running"] = False
+        _LYNIS_JOB["success"] = bool(res.get("success", False))
+        _LYNIS_JOB["message"] = str(res.get("message") or ("Auditoria Lynis concluída." if _LYNIS_JOB["success"] else "Falha ao executar auditoria Lynis."))
+        _LYNIS_JOB["finished_at"] = time.time()
+
+
+def start_lynis_audit_async() -> Dict[str, Any]:
+    with _LYNIS_LOCK:
+        if _LYNIS_JOB["running"]:
+            return {"success": True, "running": True, "message": "Auditoria Lynis já está em execução."}
+        _LYNIS_JOB["running"] = True
+        _LYNIS_JOB["success"] = None
+        _LYNIS_JOB["message"] = "Auditoria Lynis em execução..."
+        _LYNIS_JOB["started_at"] = time.time()
+        _LYNIS_JOB["finished_at"] = 0.0
+    threading.Thread(target=_lynis_worker, daemon=True).start()
+    return {"success": True, "running": True, "message": "Auditoria Lynis iniciada em segundo plano."}
+
+
+def get_lynis_audit_status() -> Dict[str, Any]:
+    with _LYNIS_LOCK:
+        return dict(_LYNIS_JOB)
+
+
 def add_firewall_rule(port: str, proto: str = "tcp", action: str = "allow") -> Dict[str, Any]:
     """Add a firewall rule safely across UFW, firewalld, or iptables."""
     if not re.match(r"^\d{1,5}$", str(port)) or not (1 <= int(port) <= 65535):
@@ -1191,12 +1229,28 @@ DEFAULT_SETTINGS = {
     "theme": "dark",
     "network_unit": "bytes",
     "github_token": "",
+    "group_disks_by_controller": False,
+    "container_updates_enabled": True,
+    "tab_order": ["overview", "apps", "containers", "node", "backup", "terminal", "admin"],
     "excluded_disks": [],
     "excluded_interfaces": [],
+    "notifications_enabled": True,
+    "quiet_hours_enabled": False,
+    "quiet_start": "22:00",
+    "quiet_end": "06:00",
     "quiet_hours": "22:00-07:00",
+    "daily_digest_enabled": False,
+    "daily_digest_time": "09:00",
     "daily_summary_time": "08:00",
+    "notify_containers": True,
+    "notify_backups": True,
+    "notify_health": True,
+    "notify_updates": True,
+    "notify_security": True,
+    "ai_enabled": False,
+    "ai_provider": "openrouter",
     "thresholds": {"cpu_warn": 80, "cpu_crit": 90, "mem_warn": 85, "mem_crit": 95, "temp_warn": 75, "disk_warn": 90},
-    "notifications": {"enabled": False, "provider": "telegram", "telegram_token": "", "telegram_chat_id": "", "discord_webhook": "", "gotify_url": "", "gotify_token": "", "apprise_url": ""},
+    "notifications": {"enabled": True, "provider": "telegram", "telegram_token": "", "telegram_chat_id": "", "discord_webhook": "", "gotify_url": "", "gotify_token": "", "apprise_url": ""},
     "ai": {"enabled": False, "provider": "openrouter", "api_key": "", "model": "google/gemini-2.0-flash-exp:free"},
 }
 

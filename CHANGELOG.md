@@ -2,6 +2,18 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.5.1] - 27/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **17.925 linhas** de código em **61 arquivos-fonte** (`9.639` `.vue` · `7.643` `.py` · `274` `.sh` · `194` `.js` · `157` `.css` · `18` `.service`).
+
+### Corrigido
+- **Carregamento inicial ao recarregar páginas (F5) (`App.vue`)**: adicionado `loadDataForTab(activeTab.value)` em `startDashboardSession()`, garantindo que recarregar diretamente em `#admin-security`, `#hardware`, `#backup`, `#admin-logs`, `#admin-audit` ou `#admin-settings` carregue imediatamente os dados reais do host (eliminando o estado falso de Firewall/Fail2Ban ausentes após F5).
+- **Persistência de seletores, checkboxes, toggles e ordem de abas (`App.vue`, `SettingsView.vue`, `AppsView.vue`, `AuditView.vue`, `LogsView.vue`, `SecurityView.vue`, `linux_ops.py`)**:
+  - Auto-salvamento silencioso para checkboxes e seletores de Notificações, IA (`ai_enabled`, `ai_provider`, `aiModel`), Atualizações de Containers e sincronização real da ordem das abas (`tab_order` + `localStorage`).
+  - Persistência em `localStorage` do filtro de modelos de IA (`aiModelFilter` / "Só Free"), períodos dos gráficos (`timeframe`, `netTimeframe`), filtros de Logs, ordenação/categoria de Apps, sub-abas/filtros/referência de Auditoria e filtros de Segurança (`fwFilter`, `f2bActiveTab`).
+- **Auditoria Lynis sem timeout atrás do Cloudflare (`linux_ops.py`, `main.py`, `App.vue`)**: `/api/security/lynis/run` agora inicia o Lynis em segundo plano e o frontend acompanha via `/api/security/lynis/status`, evitando erro `524 Gateway Timeout` no proxy Cloudflare.
+
 ## [1.5.0] - 27/11/2026
 
 ### 📊 Métricas de Código

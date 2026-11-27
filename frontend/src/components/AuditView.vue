@@ -158,7 +158,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ClipboardCheck, FileText, Play, Info, CheckCircle2, MinusCircle, Flag, ChevronDown, ChevronRight } from 'lucide-vue-next'
 
 const props = defineProps({
@@ -166,13 +166,26 @@ const props = defineProps({
 })
 defineEmits(['run-audit'])
 
-const subTab = ref('report')
-const reportMode = ref('full')
-const statusFilter = ref('all')
-const categoryFilter = ref('all')
+const readPref = (k, d) => { try { return localStorage.getItem(k) || d } catch { return d } }
+const savedBaseline = (() => {
+  try {
+    const raw = localStorage.getItem('linuxmenux-audit-baseline')
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+})()
+
+const subTab = ref(readPref('linuxmenux-audit-subtab', 'report'))
+const reportMode = ref(readPref('linuxmenux-audit-mode', 'full'))
+const statusFilter = ref(readPref('linuxmenux-audit-status', 'all'))
+const categoryFilter = ref(readPref('linuxmenux-audit-category', 'all'))
 const expandedItems = ref({})
-const baselineSaved = ref(false)
-const baselineTimestamp = ref('')
+const baselineSaved = ref(Boolean(savedBaseline?.saved))
+const baselineTimestamp = ref(savedBaseline?.timestamp || '')
+
+watch(subTab, (v) => { try { localStorage.setItem('linuxmenux-audit-subtab', v) } catch {} })
+watch(reportMode, (v) => { try { localStorage.setItem('linuxmenux-audit-mode', v) } catch {} })
+watch(statusFilter, (v) => { try { localStorage.setItem('linuxmenux-audit-status', v) } catch {} })
+watch(categoryFilter, (v) => { try { localStorage.setItem('linuxmenux-audit-category', v) } catch {} })
 const currentTimestampBr = new Date().toLocaleString('pt-BR')
 
 const categories = [
@@ -202,6 +215,12 @@ function toggleItem(id) {
 function saveBaseline() {
   baselineSaved.value = true
   baselineTimestamp.value = new Date().toLocaleString('pt-BR')
+  try {
+    localStorage.setItem('linuxmenux-audit-baseline', JSON.stringify({
+      saved: true,
+      timestamp: baselineTimestamp.value,
+    }))
+  } catch {}
 }
 
 function printReport() {

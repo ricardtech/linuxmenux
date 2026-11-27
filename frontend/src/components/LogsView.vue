@@ -182,7 +182,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { FileText, XCircle, AlertTriangle, Database, Activity, RefreshCw, Terminal, Bell, Search, Download } from 'lucide-vue-next'
 
 defineProps({
@@ -196,5 +196,6 @@ defineProps({
 
 defineEmits(['refresh', 'export', 'update:search', 'update:level', 'update:since', 'update:unit'])
 
-const subTab = ref('logs')
+const subTab = ref((() => { try { return localStorage.getItem('linuxmenux-logs-subtab') || 'logs' } catch { return 'logs' } })())
+watch(subTab, (v) => { try { localStorage.setItem('linuxmenux-logs-subtab', v) } catch {} })
 </script>

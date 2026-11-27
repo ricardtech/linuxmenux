@@ -74,6 +74,8 @@ from services.linux_ops import (
     get_security_overview,
     install_security_tool,
     run_lynis_audit,
+    start_lynis_audit_async,
+    get_lynis_audit_status,
     create_api_token,
     delete_api_token,
     run_compliance_audit,
@@ -2055,7 +2057,12 @@ def api_security_install(tool: str):
 
 @app.post("/api/security/lynis/run")
 def api_security_lynis_run():
-    return run_lynis_audit()
+    return start_lynis_audit_async()
+
+
+@app.get("/api/security/lynis/status")
+def api_security_lynis_status():
+    return get_lynis_audit_status()
 
 
 @app.post("/api/auth/api-tokens")

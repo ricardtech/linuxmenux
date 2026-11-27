@@ -676,8 +676,16 @@ const adminMenuOpen = ref(false)
 const loading = ref(false)
 const metricsLoading = ref(false)
 const netMetricsLoading = ref(false)
-const timeframe = ref('day')
-const netTimeframe = ref('day')
+const readSavedPref = (key, fallback) => {
+  try {
+    const v = localStorage.getItem(key)
+    return v !== null && v !== '' ? v : fallback
+  } catch { return fallback }
+}
+const timeframe = ref(readSavedPref('linuxmenux-overview-timeframe', 'day'))
+const netTimeframe = ref(readSavedPref('linuxmenux-overview-net-timeframe', 'day'))
+watch(timeframe, (v) => { try { localStorage.setItem('linuxmenux-overview-timeframe', v) } catch {} })
+watch(netTimeframe, (v) => { try { localStorage.setItem('linuxmenux-overview-net-timeframe', v) } catch {} })
 
 const cpuStats = ref({ avg: 0, max: 0, min: 0 })
 const memStats = ref({ avg: 0, max: 0, min: 0 })
@@ -886,9 +894,12 @@ async function deleteBackup(name) {
 // Admin: Logs, Security, Audit, Settings
 const logsData = ref({ entries: [], total: 0, errors: 0, warnings: 0 })
 const logsSearch = ref('')
-const logsLevel = ref('all')
-const logsSince = ref('24h')
-const logsUnit = ref('all')
+const logsLevel = ref(readSavedPref('linuxmenux-logs-level', 'all'))
+const logsSince = ref(readSavedPref('linuxmenux-logs-since', '24h'))
+const logsUnit = ref(readSavedPref('linuxmenux-logs-unit', 'all'))
+watch(logsLevel, (v) => { try { localStorage.setItem('linuxmenux-logs-level', v) } catch {} })
+watch(logsSince, (v) => { try { localStorage.setItem('linuxmenux-logs-since', v) } catch {} })
+watch(logsUnit, (v) => { try { localStorage.setItem('linuxmenux-logs-unit', v) } catch {} })
 async function fetchLogs() {
   const res = await fetch(`/api/events?search=${encodeURIComponent(logsSearch.value)}&level=${logsLevel.value}&since=${logsSince.value}&unit=${encodeURIComponent(logsUnit.value)}`)
   if (res.ok) logsData.value = await res.json()
@@ -949,7 +960,20 @@ async function triggerLynisAudit() {
     const res = await fetch('/api/security/lynis/run', { method: 'POST' })
     const j = await res.json().catch(() => ({}))
     if (!res.ok || j.success === false) {
-      alert(j.message || j.detail || 'Erro ao executar auditoria Lynis.')
+      alert(j.message || j.detail || 'Erro ao iniciar auditoria Lynis.')
+      return
+    }
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      const stRes = await fetch('/api/security/lynis/status').catch(() => null)
+      if (!stRes || !stRes.ok) continue
+      const st = await stRes.json().catch(() => ({}))
+      if (!st.running) {
+        if (st.success === false) {
+          alert(st.message || 'Erro ao executar auditoria Lynis.')
+        }
+        break
+      }
     }
     await fetchSecurity()
   } finally { lynisRunning.value = false }
@@ -1395,44 +1419,48 @@ function sendTerminalCommand(cmd) {
   }
 }
 
-watch(activeTab, async (newTab) => {
-  if (newTab === 'overview') {
+async function loadDataForTab(tab) {
+  if (tab === 'overview') {
     await nextTick()
     initCharts()
     updateMetricsCharts()
     updateOverviewNetChart()
-  } else if (newTab === 'terminal') {
+  } else if (tab === 'terminal') {
     nextTick(() => {
       initTerminal()
     })
-  } else if (newTab === 'network-flow' || newTab.startsWith('network')) {
+  } else if (tab === 'network-flow' || tab.startsWith('network')) {
     await nextTick()
-    if (newTab === 'network-overview') {
+    if (tab === 'network-overview') {
       initCharts()
       updateOverviewNetChart()
     }
     fetchFlowData()
-  } else if (newTab === 'apps') {
+  } else if (tab === 'apps') {
     fetchCustomLinks()
     fetchAppOverrides()
-  } else if (newTab === 'containers') {
+  } else if (tab === 'containers') {
     fetchContainerUpdates()
-  } else if (newTab === 'storage') {
+  } else if (tab === 'storage') {
     fetchStorageDisks()
-  } else if (newTab === 'hardware') {
+  } else if (tab === 'hardware') {
     fetchHardwareFull()
-  } else if (newTab === 'backup') {
+  } else if (tab === 'backup') {
     fetchBackups()
-  } else if (newTab === 'admin-logs') {
+  } else if (tab === 'admin-logs') {
     fetchLogs()
     fetchBackups()
-  } else if (newTab === 'admin-security') {
+  } else if (tab === 'admin-security') {
     fetchSecurity()
-  } else if (newTab === 'admin-audit') {
+  } else if (tab === 'admin-audit') {
     fetchAuditReport()
-  } else if (newTab === 'admin-settings' || newTab === 'admin') {
+  } else if (tab === 'admin-settings' || tab === 'admin') {
     fetchAdminSettings()
   }
+}
+
+watch(activeTab, async (newTab) => {
+  await loadDataForTab(newTab)
 })
 
 // Real Telemetry Reactive Data (100% Real - Zero Mocks)
@@ -2272,9 +2300,7 @@ async function startDashboardSession() {
   fetchAdminSettings()
   await nextTick()
   initCharts()
-  if (activeTab.value === 'terminal') {
-    initTerminal()
-  }
+  await loadDataForTab(activeTab.value)
   setInterval(fetchTelemetry, 3000)
   setInterval(fetchFlowData, 2000)
   setInterval(() => {

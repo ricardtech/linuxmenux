@@ -154,7 +154,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { Plus, Search, Grid3x3, Pencil, Trash2, ExternalLink } from 'lucide-vue-next'
 import BaseModal from './BaseModal.vue'
 
@@ -165,8 +165,11 @@ const props = defineProps({
 
 const emit = defineEmits(['open-add', 'delete-custom', 'save-override'])
 
-const selectedCategory = ref('__all__')
-const sortBy = ref('name')
+const readPref = (k, d) => { try { return localStorage.getItem(k) || d } catch { return d } }
+const selectedCategory = ref(readPref('linuxmenux-apps-category', '__all__'))
+const sortBy = ref(readPref('linuxmenux-apps-sort', 'name'))
+watch(selectedCategory, (v) => { try { localStorage.setItem('linuxmenux-apps-category', v) } catch {} })
+watch(sortBy, (v) => { try { localStorage.setItem('linuxmenux-apps-sort', v) } catch {} })
 const search = ref('')
 const editOpen = ref(false)
 const editForm = ref({ id: '', name: '', url: '', category: '', description: '' })

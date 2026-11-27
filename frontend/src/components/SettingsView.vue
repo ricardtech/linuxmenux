@@ -674,13 +674,14 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import {
   Globe2, Ruler, Layers, HardDrive, HeartPulse, Network, Database, Bell,
   Settings2, Check, RotateCcw, Eye, EyeOff, Send, Code, Sparkles, Copy, Trash2, Plus, Package,
   SlidersHorizontal, Cpu, MemoryStick, Thermometer
 } from 'lucide-vue-next'
 import { fetchApi } from '../lib/api-config'
+import { loadTabOrder, saveTabOrder, DEFAULT_TAB_ORDER } from '../lib/tab-order'
 
 const props = defineProps({
   settingsData: { type: Object, required: true },
@@ -698,6 +699,13 @@ const emit = defineEmits([
   'update:telegramToken', 'update:telegramChatId', 'update:discordWebhook', 'update:aiApiKey', 'update:aiModel',
 ])
 
+const readPref = (key, fallback = '') => {
+  try {
+    const v = localStorage.getItem(key)
+    return v !== null ? v : fallback
+  } catch { return fallback }
+}
+
 const editing = ref('')
 const savedCard = ref('')
 const notifTab = ref('channels')
@@ -707,13 +715,16 @@ const showGotifyToken = ref(false)
 const showPushoverToken = ref(false)
 const showAiKey = ref(false)
 const showGithubToken = ref(false)
-const activeNotifChannel = ref('telegram')
+const activeNotifChannel = ref(readPref('linuxmenux-settings-notif-channel', 'telegram'))
 const aiModelsList = ref([])
 const loadingAiModels = ref(false)
-const aiModelFilter = ref('')
+const aiModelFilter = ref(readPref('linuxmenux-ai-model-filter', ''))
 const aiModelsError = ref('')
 const testingAi = ref(false)
 const aiTestResult = ref(null)
+
+watch(activeNotifChannel, (v) => { try { localStorage.setItem('linuxmenux-settings-notif-channel', v) } catch {} })
+watch(aiModelFilter, (v) => { try { localStorage.setItem('linuxmenux-ai-model-filter', v) } catch {} })
 
 const filteredAiModels = computed(() => {
   const q = aiModelFilter.value.trim().toLowerCase()
@@ -801,7 +812,9 @@ const snippets = ref([])
 const newSnippet = ref({ name: '', command: '' })
 const optimizations = ref([])
 
+const readyForAutoSave = ref(false)
 onMounted(async () => {
+  setTimeout(() => { readyForAutoSave.value = true }, 200)
   try {
     const [snRes, optRes] = await Promise.all([
       fetch('/api/snippets'),
@@ -844,8 +857,18 @@ function copySnippet(cmd) {
   navigator.clipboard?.writeText(cmd)
 }
 
-const DEFAULT_TABS = ['overview', 'apps', 'containers', 'node', 'backup', 'terminal', 'admin']
-const tabOrder = ref([...DEFAULT_TABS])
+const DEFAULT_TABS = [...DEFAULT_TAB_ORDER]
+const tabOrder = ref(loadTabOrder())
+watch(
+  () => props.settingsData?.tab_order,
+  (order) => {
+    if (Array.isArray(order) && order.length) {
+      tabOrder.value = [...order]
+      saveTabOrder(order)
+    }
+  },
+  { immediate: true, deep: true }
+)
 const tabLabels = {
   overview: 'Visão geral',
   apps: 'Apps',
@@ -901,8 +924,34 @@ function toggleExcludedDisk(name) {
   props.settingsData.excluded_disks = list.includes(name) ? list.filter(x => x !== name) : [...list, name]
 }
 
+// Auto-salva silenciosamente toggles/selects que não possuem botão Editar/Salvar próprio
+watch(
+  () => [
+    props.settingsData?.notifications_enabled,
+    props.settingsData?.quiet_hours_enabled,
+    props.settingsData?.daily_digest_enabled,
+    props.settingsData?.notify_containers,
+    props.settingsData?.notify_backups,
+    props.settingsData?.notify_health,
+    props.settingsData?.notify_updates,
+    props.settingsData?.notify_security,
+    props.settingsData?.ai_enabled,
+    props.settingsData?.ai_provider,
+    props.settingsData?.container_updates_enabled,
+    props.aiModel,
+  ],
+  (_next, prev) => {
+    if (!readyForAutoSave.value || !prev || prev.every((v) => v === undefined)) return
+    emit('save', true)
+  }
+)
+
 async function saveSection(section) {
-  await emit('save')
+  if (section === 'taborder') {
+    props.settingsData.tab_order = [...tabOrder.value]
+    saveTabOrder(tabOrder.value)
+  }
+  emit('save', true)
   editing.value = ''
   savedCard.value = section
   setTimeout(() => { savedCard.value = '' }, 2500)
