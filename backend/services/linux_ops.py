@@ -1157,7 +1157,7 @@ DEFAULT_SETTINGS = {
     "daily_summary_time": "08:00",
     "thresholds": {"cpu_warn": 80, "cpu_crit": 90, "mem_warn": 85, "mem_crit": 95, "temp_warn": 75, "disk_warn": 90},
     "notifications": {"enabled": False, "provider": "telegram", "telegram_token": "", "telegram_chat_id": "", "discord_webhook": "", "gotify_url": "", "gotify_token": "", "apprise_url": ""},
-    "ai": {"provider": "openrouter", "api_key": "", "model": "nvidia/nemotron-3-nano-30b-a3b:reasoning:free"},
+    "ai": {"enabled": False, "provider": "openrouter", "api_key": "", "model": "google/gemini-2.0-flash-exp:free"},
 }
 
 

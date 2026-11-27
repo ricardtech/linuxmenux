@@ -2,9 +2,9 @@
   <img src="./frontend/public/logo.svg" alt="Linux Menux - Monitor" width="56" height="56" />
 </div>
 
-# Linux Menux - Monitor `v1.4.6`
+# Linux Menux - Monitor `v1.4.7`
 
-[![Versão](https://img.shields.io/badge/versão-1.4.6-orange.svg)](./CHANGELOG.md)
+[![Versão](https://img.shields.io/badge/versão-1.4.7-orange.svg)](./CHANGELOG.md)
 [![Forgejo](https://img.shields.io/badge/Forgejo-Self--Hosted-ea580c?logo=forgejo)](https://git.ricardtech.top/RicardTech/linuxmenux)
 [![GitLab](https://img.shields.io/badge/GitLab-Triplo--Push-fc6d26?logo=gitlab)](https://gitlab.com/ricard-tech/linuxmenux)
 [![Métricas](https://img.shields.io/badge/RicardTech-Metrics-0ea5e9)](https://git.ricardtech.top/RicardTech/ricardtech-metrics)

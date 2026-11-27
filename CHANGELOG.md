@@ -2,6 +2,21 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.7] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.576 linhas** de código em **94 arquivos-fonte** (`9.535` `.vue` · `7.473` `.py` · `7.610` `.css` · `2.668` `.js` · `272` `.sh` · `18` `.service`).
+
+### Adicionado
+- **Suporte Multi-Provedor de IA com Modelos Gratuitos (`main.py` & `SettingsView.vue`)**: adicionados **OpenRouter**, **OpenCode Zen**, **Groq**, **Google Gemini**, **Cerebras**, **Mistral AI**, **GitHub Models**, **OpenAI**, **Anthropic (Claude)** e **Ollama (Local)**.
+- **Filtro `free` + botão `Só Free` em Modelos (`SettingsView.vue`)**: após carregar modelos do provedor, permite digitar `free` (ou clicar em `Só Free`) para filtrar instantaneamente os modelos gratuitos.
+- **Teste real de conexão IA (`POST /api/ai/test`)**: o botão `Salvar e Testar Conexão IA` agora salva os dados e executa uma chamada real ao provedor/modelo, exibindo modal de confirmação com latência (`ms`) e resposta real da IA (ou erro detalhado).
+
+### Corrigido
+- **Persistência de Provedor e Ativação de IA (`App.vue` & `linux_ops.py`)**: corrigido `fetchAdminSettings()` e `saveAdminSettings()` que apagavam `ai_provider` e `ai_enabled` ao salvar ou dar `F5`.
+- **Diagnóstico AIOps universal (`main.py`)**: `/api/ai/network-diagnosis` agora lê `_resolve_ai_config(cfg)` e funciona com qualquer provedor configurado (não apenas chave legada OpenRouter).
+- **Responsividade do campo Modelo + Carregar (`SettingsView.vue`)**: corrigido o overflow horizontal com grid 12 colunas (`min-w-0`) e `flex-col sm:flex-row`.
+
 ## [1.4.6] - 26/11/2026
 
 ### 📊 Métricas de Código

@@ -441,55 +441,124 @@
         </div>
       </div>
 
-      <!-- Aprimoramento de IA (1:1 Imagens 9-11) -->
-      <div class="p-4 rounded-xl bg-zinc-950/70 border border-purple-500/30 space-y-4 text-xs">
-        <div class="flex items-center justify-between">
+      <!-- Aprimoramento de IA (Multi-Provedor + Filtro Free + Teste Real) -->
+      <div class="p-4 rounded-xl bg-white/[0.025] border border-purple-500/30 space-y-4 text-xs">
+        <div class="flex items-center justify-between gap-3">
           <div>
             <div class="text-sm font-bold text-white flex items-center gap-2">
               <Sparkles class="w-4 h-4 text-purple-400" /> Aprimoramento de IA
             </div>
-            <div class="text-zinc-400 mt-0.5">Use IA para gerar mensagens de notificação contextuais</div>
+            <div class="text-zinc-400 mt-0.5">Use IA para análises de rede AIOps e mensagens de notificação contextuais</div>
           </div>
-          <input type="checkbox" v-model="settingsData.ai_enabled" class="w-4 h-4 accent-purple-500 cursor-pointer" />
+          <input type="checkbox" v-model="settingsData.ai_enabled" class="w-4 h-4 accent-purple-500 cursor-pointer shrink-0" />
         </div>
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-3">
+          <div class="lg:col-span-3 min-w-0">
             <label class="block text-zinc-300 font-medium mb-1">Provedor</label>
             <select v-model="settingsData.ai_provider" class="w-full bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white">
-              <option value="openrouter">OpenRouter</option>
+              <option value="openrouter">OpenRouter (Multi-IA / Free)</option>
+              <option value="opencode">OpenCode Zen (Modelos Free)</option>
+              <option value="groq">Groq (Grátis · Rápido)</option>
+              <option value="gemini">Google Gemini (Tier Free)</option>
+              <option value="cerebras">Cerebras (Tier Free)</option>
+              <option value="mistral">Mistral AI (Tier Free)</option>
+              <option value="github">GitHub Models (Free c/ Token)</option>
               <option value="openai">OpenAI</option>
               <option value="anthropic">Anthropic (Claude)</option>
-              <option value="gemini">Google Gemini</option>
-              <option value="groq">Groq</option>
-              <option value="ollama">Ollama (Local)</option>
+              <option value="ollama">Ollama (Local · 100% Grátis)</option>
             </select>
           </div>
-          <div>
+
+          <div class="lg:col-span-4 min-w-0">
             <label class="block text-zinc-300 font-medium mb-1">Chave de API</label>
             <div class="relative">
-              <input :value="aiApiKey" @input="$emit('update:aiApiKey', $event.target.value)" :type="showAiKey ? 'text' : 'password'" placeholder="sk-or-v1-..." class="w-full bg-zinc-900 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono" />
+              <input :value="aiApiKey" @input="$emit('update:aiApiKey', $event.target.value)" :type="showAiKey ? 'text' : 'password'" placeholder="Cole sua API key aqui..." class="w-full bg-zinc-900 border border-zinc-700 rounded-md pl-3 pr-9 py-2 text-white font-mono min-w-0" />
               <button type="button" @click="showAiKey = !showAiKey" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white cursor-pointer">
                 <EyeOff v-if="showAiKey" class="w-4 h-4" /><Eye v-else class="w-4 h-4" />
               </button>
             </div>
           </div>
-          <div>
-            <label class="block text-zinc-300 font-medium mb-1">Modelo</label>
-            <div class="flex gap-2">
-              <select v-if="aiModelsList.length" :value="aiModel" @change="$emit('update:aiModel', $event.target.value)" class="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono">
-                <option value="">Selecione um modelo...</option>
-                <option v-for="m in aiModelsList" :key="m" :value="m">{{ m }}</option>
+
+          <div class="md:col-span-2 lg:col-span-5 min-w-0 space-y-2">
+            <label class="block text-zinc-300 font-medium">Modelo</label>
+            <div class="flex flex-col sm:flex-row gap-2 min-w-0">
+              <select v-if="aiModelsList.length" :value="aiModel" @change="$emit('update:aiModel', $event.target.value)" class="w-full sm:flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono truncate">
+                <option value="">Selecione ({{ filteredAiModels.length }} modelos)...</option>
+                <option v-for="m in filteredAiModels" :key="m" :value="m">{{ m }}</option>
               </select>
-              <input v-else :value="aiModel" @input="$emit('update:aiModel', $event.target.value)" type="text" placeholder="Clique em Carregar para buscar modelos" class="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
+              <input v-else :value="aiModel" @input="$emit('update:aiModel', $event.target.value)" type="text" placeholder="Digite o modelo ou clique em Carregar" class="w-full sm:flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-2 text-white font-mono" />
               <button type="button" @click="loadAiModels" :disabled="loadingAiModels" class="px-3 py-2 rounded-md bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-200 font-semibold shrink-0 cursor-pointer">
-                {{ loadingAiModels ? '...' : 'Carregar' }}
+                {{ loadingAiModels ? 'Carregando...' : 'Carregar' }}
+              </button>
+            </div>
+            <div v-if="aiModelsList.length" class="flex flex-wrap items-center gap-2">
+              <input
+                v-model="aiModelFilter"
+                type="text"
+                placeholder="Filtrar modelos (ex: free, gemini, llama)..."
+                class="flex-1 min-w-[160px] bg-zinc-900/80 border border-zinc-700/80 rounded-md px-2.5 py-1.5 text-white font-mono placeholder-zinc-500"
+              />
+              <button
+                type="button"
+                @click="aiModelFilter = aiModelFilter.toLowerCase() === 'free' ? '' : 'free'"
+                class="px-2.5 py-1.5 rounded-md border font-semibold cursor-pointer shrink-0 transition"
+                :class="aiModelFilter.toLowerCase() === 'free'
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : 'bg-zinc-900 border-zinc-700 text-zinc-300 hover:bg-zinc-800'"
+              >
+                Só Free
               </button>
             </div>
           </div>
         </div>
-        <button type="button" @click="saveSection('notif')" class="w-full py-2.5 rounded-lg bg-purple-700/40 hover:bg-purple-700/60 border border-purple-500/40 text-purple-200 font-semibold cursor-pointer">
-          ⚡ Salvar e Testar Conexão IA
+
+        <div v-if="aiModelsError" class="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300">
+          {{ aiModelsError }}
+        </div>
+
+        <button
+          type="button"
+          @click="saveAndTestAi"
+          :disabled="testingAi"
+          class="w-full py-2.5 rounded-lg bg-purple-700/40 hover:bg-purple-700/60 disabled:opacity-50 border border-purple-500/40 text-purple-200 font-semibold cursor-pointer transition"
+        >
+          {{ testingAi ? '⏳ Testando conexão real com a IA...' : '⚡ Salvar e Testar Conexão IA' }}
         </button>
+      </div>
+
+      <!-- Modal de Confirmação do Teste de Conexão IA -->
+      <div
+        v-if="aiTestResult"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        @click.self="aiTestResult = null"
+      >
+        <div class="w-full max-w-md bg-[var(--card)] border border-zinc-700/80 rounded-xl p-5 space-y-4 shadow-2xl text-xs">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <Sparkles class="w-4 h-4" :class="aiTestResult.success ? 'text-emerald-400' : 'text-red-400'" />
+              <h4 class="text-sm font-bold text-white">
+                {{ aiTestResult.success ? 'Conexão IA Confirmada!' : 'Falha no Teste de Conexão IA' }}
+              </h4>
+            </div>
+            <button type="button" @click="aiTestResult = null" class="text-zinc-400 hover:text-white cursor-pointer">✕</button>
+          </div>
+
+          <div class="p-3 rounded-lg border space-y-1.5"
+            :class="aiTestResult.success ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200' : 'bg-red-500/10 border-red-500/30 text-red-200'">
+            <div><strong>Provedor:</strong> {{ aiTestResult.provider }}</div>
+            <div class="font-mono break-all"><strong>Modelo:</strong> {{ aiTestResult.model }}</div>
+            <div v-if="aiTestResult.latency_ms !== undefined"><strong>Latência:</strong> {{ aiTestResult.latency_ms }} ms</div>
+            <div v-if="aiTestResult.success"><strong>Resposta da IA:</strong> {{ aiTestResult.reply }}</div>
+            <div v-else class="break-words"><strong>Erro:</strong> {{ aiTestResult.error }}</div>
+          </div>
+
+          <div class="flex justify-end">
+            <button type="button" @click="aiTestResult = null" class="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold cursor-pointer">
+              OK
+            </button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -605,7 +674,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import {
   Globe2, Ruler, Layers, HardDrive, HeartPulse, Network, Database, Bell,
   Settings2, Check, RotateCcw, Eye, EyeOff, Send, Code, Sparkles, Copy, Trash2, Plus, Package,
@@ -641,9 +710,20 @@ const showGithubToken = ref(false)
 const activeNotifChannel = ref('telegram')
 const aiModelsList = ref([])
 const loadingAiModels = ref(false)
+const aiModelFilter = ref('')
+const aiModelsError = ref('')
+const testingAi = ref(false)
+const aiTestResult = ref(null)
+
+const filteredAiModels = computed(() => {
+  const q = aiModelFilter.value.trim().toLowerCase()
+  if (!q) return aiModelsList.value
+  return aiModelsList.value.filter((m) => String(m).toLowerCase().includes(q))
+})
 
 async function loadAiModels() {
   loadingAiModels.value = true
+  aiModelsError.value = ''
   try {
     const res = await fetchApi('/api/ai/models', {
       method: 'POST',
@@ -656,9 +736,40 @@ async function loadAiModels() {
     if (res.ok) {
       const d = await res.json()
       aiModelsList.value = d.models || []
+      if (!d.success && d.error) {
+        aiModelsError.value = `Não foi possível listar modelos: ${d.error}`
+      }
     }
   } finally {
     loadingAiModels.value = false
+  }
+}
+
+async function saveAndTestAi() {
+  testingAi.value = true
+  aiTestResult.value = null
+  try {
+    props.settingsData.ai_enabled = true
+    emit('save', true)
+    const res = await fetchApi('/api/ai/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        provider: props.settingsData?.ai_provider || 'openrouter',
+        api_key: props.aiApiKey || '',
+        model: props.aiModel || '',
+      }),
+    })
+    aiTestResult.value = await res.json()
+  } catch (e) {
+    aiTestResult.value = {
+      success: false,
+      provider: props.settingsData?.ai_provider || 'openrouter',
+      model: props.aiModel || '-',
+      error: 'Erro de conexão ao testar a IA.',
+    }
+  } finally {
+    testingAi.value = false
   }
 }
 

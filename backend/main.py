@@ -1229,25 +1229,156 @@ def get_network_flow():
     }
 
 
+AI_PROVIDER_CONFIG = {
+    "openrouter": {
+        "label": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "models_url": "https://openrouter.ai/api/v1/models",
+        "default_model": "google/gemini-2.0-flash-exp:free",
+    },
+    "opencode": {
+        "label": "OpenCode Zen",
+        "base_url": "https://opencode.ai/zen/v1",
+        "models_url": "https://opencode.ai/zen/v1/models",
+        "default_model": "big-pickle",
+    },
+    "groq": {
+        "label": "Groq",
+        "base_url": "https://api.groq.com/openai/v1",
+        "models_url": "https://api.groq.com/openai/v1/models",
+        "default_model": "llama-3.3-70b-versatile",
+    },
+    "gemini": {
+        "label": "Google Gemini",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "models_url": "https://generativelanguage.googleapis.com/v1beta/openai/models",
+        "default_model": "gemini-2.5-flash",
+    },
+    "cerebras": {
+        "label": "Cerebras",
+        "base_url": "https://api.cerebras.ai/v1",
+        "models_url": "https://api.cerebras.ai/v1/models",
+        "default_model": "llama-3.3-70b",
+    },
+    "mistral": {
+        "label": "Mistral AI",
+        "base_url": "https://api.mistral.ai/v1",
+        "models_url": "https://api.mistral.ai/v1/models",
+        "default_model": "mistral-small-latest",
+    },
+    "github": {
+        "label": "GitHub Models",
+        "base_url": "https://models.inference.ai.azure.com",
+        "models_url": "",
+        "default_model": "gpt-4o-mini",
+    },
+    "openai": {
+        "label": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "models_url": "https://api.openai.com/v1/models",
+        "default_model": "gpt-4o-mini",
+    },
+    "anthropic": {
+        "label": "Anthropic (Claude)",
+        "base_url": "https://api.anthropic.com/v1",
+        "models_url": "",
+        "default_model": "claude-3-5-haiku-latest",
+    },
+    "ollama": {
+        "label": "Ollama (Local)",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "models_url": "http://127.0.0.1:11434/api/tags",
+        "default_model": "llama3.2",
+    },
+}
+
+
+def _resolve_ai_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    ai_block = cfg.get("ai") if isinstance(cfg.get("ai"), dict) else {}
+    provider = str(ai_block.get("provider") or cfg.get("ai_provider") or "openrouter").lower().strip()
+    if provider not in AI_PROVIDER_CONFIG:
+        provider = "openrouter"
+    api_key = str(ai_block.get("api_key") or cfg.get("openrouter_api_key") or "").strip()
+    model = str(ai_block.get("model") or cfg.get("openrouter_model") or AI_PROVIDER_CONFIG[provider]["default_model"]).strip()
+    enabled = bool(ai_block.get("enabled", cfg.get("ai_enabled", bool(api_key))))
+    return {"provider": provider, "api_key": api_key, "model": model, "enabled": enabled}
+
+
+def _call_ai_chat(provider: str, api_key: str, model: str, system_prompt: str, user_prompt: str, json_mode: bool = False, timeout: int = 25) -> str:
+    p_cfg = AI_PROVIDER_CONFIG.get(provider, AI_PROVIDER_CONFIG["openrouter"])
+    if provider == "anthropic":
+        req = urllib.request.Request(
+            f"{p_cfg['base_url']}/messages",
+            data=json.dumps({
+                "model": model,
+                "max_tokens": 600,
+                "system": system_prompt,
+                "messages": [{"role": "user", "content": user_prompt}],
+            }).encode("utf-8"),
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw_body = json.loads(resp.read().decode("utf-8"))
+        return raw_body["content"][0]["text"]
+
+    payload: Dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    }
+    if json_mode and provider in ("openrouter", "openai", "groq", "gemini", "mistral", "cerebras"):
+        payload["response_format"] = {"type": "json_object"}
+
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": f"LinuxMenux/{_read_app_version()}",
+    }
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/ricardtech/linuxmenux"
+        headers["X-Title"] = "Linux Menux - Monitor"
+
+    req = urllib.request.Request(
+        f"{p_cfg['base_url']}/chat/completions",
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw_body = json.loads(resp.read().decode("utf-8"))
+    return raw_body["choices"][0]["message"]["content"]
+
+
 @app.post("/api/ai/network-diagnosis")
 def post_ai_network_diagnosis():
-    """Diagnóstico AIOps real via OpenRouter (sem retorno simulado quando sem token)."""
+    """Diagnóstico AIOps real multi-provedor (OpenRouter, OpenCode, Groq, Gemini, Cerebras, Mistral, OpenAI, Anthropic, Ollama)."""
     cfg = get_settings()
-    api_key = (cfg.get("openrouter_api_key") or "").strip()
-    model = (cfg.get("openrouter_model") or "nvidia/nemotron-3-nano-30b-a3b:reasoning:free").strip()
+    ai_cfg = _resolve_ai_config(cfg)
+    provider = ai_cfg["provider"]
+    provider_label = AI_PROVIDER_CONFIG[provider]["label"]
+    api_key = ai_cfg["api_key"]
+    model = ai_cfg["model"]
     now_br = time.strftime("%d/%m/%Y %H:%M:%S")
 
-    if not api_key:
+    if not api_key and provider != "ollama":
         return {
             "status": "not_configured",
             "timestamp": now_br,
             "title": "Diagnóstico AIOps não configurado",
-            "interface_summary": "Nenhuma chave de API OpenRouter configurada.",
+            "interface_summary": f"Nenhuma chave de API configurada para {provider_label}.",
             "findings": [
                 {
                     "level": "warning",
                     "badge": "Chave de IA ausente",
-                    "message": "Configure sua chave da API OpenRouter em Administrador → Configurações → Notificações & IA para executar análises reais de rede e segurança com IA.",
+                    "message": "Configure seu provedor e chave de API em Administrador → Configurações → Notificações & IA para executar análises reais de rede e segurança com IA.",
                 }
             ],
             "recommendation": "Nenhuma chamada de IA foi executada (nenhum token configurado).",
@@ -1263,30 +1394,23 @@ def post_ai_network_diagnosis():
         "running_containers": [c.get("name") for c in net.get("vm_lxc_interfaces", []) if c.get("vm_status") == "running"],
     }
     try:
-        req = urllib.request.Request(
-            "https://openrouter.ai/api/v1/chat/completions",
-            data=json.dumps({
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": "Você é um engenheiro de redes Linux/Docker. Responda em JSON com os campos: interface_summary (string), findings (lista de {level, badge, message}), recommendation (string). Tudo em Português do Brasil."},
-                    {"role": "user", "content": f"Analise esta topologia real de rede: {json.dumps(prompt_data, ensure_ascii=False)}"},
-                ],
-                "response_format": {"type": "json_object"},
-            }).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
+        content = _call_ai_chat(
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            system_prompt="Você é um engenheiro de redes Linux/Docker. Responda apenas em JSON válido com os campos: interface_summary (string), findings (lista de {level, badge, message}), recommendation (string). Tudo em Português do Brasil.",
+            user_prompt=f"Analise esta topologia real de rede: {json.dumps(prompt_data, ensure_ascii=False)}",
+            json_mode=True,
+            timeout=25,
         )
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            raw_body = json.loads(resp.read().decode("utf-8"))
-        content = raw_body["choices"][0]["message"]["content"]
-        parsed = json.loads(content)
+        clean_json = content.strip()
+        if clean_json.startswith("```"):
+            clean_json = re.sub(r"^```(?:json)?\s*|\s*```$", "", clean_json, flags=re.DOTALL).strip()
+        parsed = json.loads(clean_json)
         return {
             "status": "healthy",
             "timestamp": now_br,
-            "title": f"Diagnóstico AIOps ({model})",
+            "title": f"Diagnóstico AIOps · {provider_label} ({model})",
             "interface_summary": parsed.get("interface_summary", f"Interface principal: {prompt_data['default_interface']}"),
             "findings": parsed.get("findings", []),
             "recommendation": parsed.get("recommendation", ""),
@@ -1295,12 +1419,12 @@ def post_ai_network_diagnosis():
         return {
             "status": "error",
             "timestamp": now_br,
-            "title": "Falha ao consultar OpenRouter",
+            "title": f"Falha ao consultar {provider_label}",
             "interface_summary": f"Interface principal: {prompt_data['default_interface']} ({prompt_data['default_media']})",
             "findings": [
-                {"level": "warning", "badge": "Erro OpenRouter", "message": str(exc)}
+                {"level": "warning", "badge": f"Erro {provider_label}", "message": str(exc)}
             ],
-            "recommendation": "Verifique sua chave OpenRouter e a conectividade externa.",
+            "recommendation": f"Verifique sua chave/modelo de {provider_label} em Configurações e teste a conexão.",
         }
 
 
@@ -1668,32 +1792,84 @@ async def api_list_ai_models(request: Request):
     api_key = str(body.get("api_key") or "").strip()
     models: List[str] = []
     try:
-        if provider == "openrouter":
-            headers = {"Accept": "application/json", "User-Agent": f"LinuxMenux/{_read_app_version()}"}
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
-            req = urllib.request.Request("https://openrouter.ai/api/v1/models", headers=headers)
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                models = [str(m.get("id")) for m in (data.get("data") or []) if m.get("id")]
-        elif provider == "openai":
-            req = urllib.request.Request("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {api_key}"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                models = sorted([str(m.get("id")) for m in (data.get("data") or []) if m.get("id")])
-        elif provider == "groq":
-            req = urllib.request.Request("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {api_key}"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                models = sorted([str(m.get("id")) for m in (data.get("data") or []) if m.get("id")])
-        elif provider == "ollama":
+        p_cfg = AI_PROVIDER_CONFIG.get(provider)
+        if provider == "ollama":
             req = urllib.request.Request("http://127.0.0.1:11434/api/tags")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 models = [str(m.get("name")) for m in (data.get("models") or []) if m.get("name")]
-        return {"success": True, "models": models[:200]}
+        elif provider == "anthropic":
+            models = [
+                "claude-3-5-haiku-latest",
+                "claude-3-5-sonnet-latest",
+                "claude-3-7-sonnet-latest",
+            ]
+        elif provider == "github":
+            models = [
+                "gpt-4o-mini",
+                "gpt-4o",
+                "Meta-Llama-3.3-70B-Instruct",
+                "DeepSeek-R1",
+                "Mistral-Small",
+            ]
+        elif p_cfg and p_cfg.get("models_url"):
+            headers = {"Accept": "application/json", "User-Agent": f"LinuxMenux/{_read_app_version()}"}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            req = urllib.request.Request(p_cfg["models_url"], headers=headers)
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                raw_list = data.get("data") or data.get("models") or []
+                models = [str(m.get("id") or m.get("name")) for m in raw_list if (m.get("id") or m.get("name"))]
+                if provider != "openrouter":
+                    models = sorted(models)
+        return {"success": True, "models": models[:400]}
     except Exception as exc:
         return {"success": False, "models": [], "error": str(exc)}
+
+
+@app.post("/api/ai/test")
+async def api_test_ai_connection(request: Request):
+    """Testa realmente a conexão e o modelo do provedor de IA configurado."""
+    body = await request.json()
+    provider = str(body.get("provider") or "openrouter").lower().strip()
+    if provider not in AI_PROVIDER_CONFIG:
+        provider = "openrouter"
+    api_key = str(body.get("api_key") or "").strip()
+    model = str(body.get("model") or AI_PROVIDER_CONFIG[provider]["default_model"]).strip()
+    provider_label = AI_PROVIDER_CONFIG[provider]["label"]
+
+    if not api_key and provider != "ollama":
+        return {"success": False, "provider": provider_label, "model": model, "error": "Chave de API não informada."}
+
+    t0 = time.time()
+    try:
+        reply = _call_ai_chat(
+            provider=provider,
+            api_key=api_key,
+            model=model,
+            system_prompt="Responda apenas com uma confirmação curta em português: Conexão OK.",
+            user_prompt="Teste de conexão Linux Menux.",
+            json_mode=False,
+            timeout=20,
+        )
+        latency_ms = int((time.time() - t0) * 1000)
+        return {
+            "success": True,
+            "provider": provider_label,
+            "model": model,
+            "latency_ms": latency_ms,
+            "reply": (reply or "Conexão OK").strip()[:220],
+        }
+    except Exception as exc:
+        latency_ms = int((time.time() - t0) * 1000)
+        return {
+            "success": False,
+            "provider": provider_label,
+            "model": model,
+            "latency_ms": latency_ms,
+            "error": str(exc),
+        }
 
 
 @app.post("/api/notifications/test")

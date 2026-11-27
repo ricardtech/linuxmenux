@@ -971,34 +971,53 @@ async function fetchAdminSettings() {
   const res = await fetch('/api/settings')
   if (res.ok) {
     const j = await res.json()
+    const ai = j.ai || {}
+    const notif = j.notifications || {}
     settingsData.value = {
+      ...settingsData.value,
+      ...j,
       language: j.language || 'pt-BR',
       network_unit: j.network_unit || 'bytes',
-      thresholds: { cpu_warn: 80, cpu_crit: 90, mem_warn: 85, mem_crit: 95, temp_warn: 75, disk_warn: 90, ...(j.thresholds || {}) }
+      ai_provider: ai.provider || j.ai_provider || 'openrouter',
+      ai_enabled: Boolean(ai.enabled ?? j.ai_enabled ?? false),
+      notifications_enabled: notif.enabled !== false && j.notifications_enabled !== false,
+      thresholds: { cpu_warn: 80, cpu_crit: 90, mem_warn: 85, mem_crit: 95, temp_warn: 75, disk_warn: 90, ...(j.thresholds || {}) },
     }
-    if (j.notifications) {
-      telegramToken.value = j.notifications.telegram_token || ''
-      telegramChatId.value = j.notifications.telegram_chat_id || ''
-      discordWebhook.value = j.notifications.discord_webhook || ''
-    }
-    if (j.ai) {
-      aiApiKey.value = j.ai.api_key || ''
-      aiModel.value = j.ai.model || 'nvidia/nemotron-3-nano-30b-a3b:reasoning:free'
-    }
+    telegramToken.value = notif.telegram_token || ''
+    telegramChatId.value = notif.telegram_chat_id || ''
+    discordWebhook.value = notif.discord_webhook || ''
+    aiApiKey.value = ai.api_key || j.openrouter_api_key || ''
+    aiModel.value = ai.model || j.openrouter_model || 'google/gemini-2.0-flash-exp:free'
   }
 }
-async function saveAdminSettings() {
+async function saveAdminSettings(silent = false) {
   await fetch('/api/settings', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
+      ...settingsData.value,
       language: settingsData.value.language,
       network_unit: settingsData.value.network_unit,
       thresholds: settingsData.value.thresholds,
-      notifications: { telegram_token: telegramToken.value, telegram_chat_id: telegramChatId.value, discord_webhook: discordWebhook.value },
-      ai: { api_key: aiApiKey.value, model: aiModel.value }
+      notifications_enabled: settingsData.value.notifications_enabled !== false,
+      notifications: {
+        enabled: settingsData.value.notifications_enabled !== false,
+        telegram_token: telegramToken.value,
+        telegram_chat_id: telegramChatId.value,
+        discord_webhook: discordWebhook.value,
+      },
+      ai_provider: settingsData.value.ai_provider || 'openrouter',
+      ai_enabled: Boolean(settingsData.value.ai_enabled),
+      ai: {
+        enabled: Boolean(settingsData.value.ai_enabled),
+        provider: settingsData.value.ai_provider || 'openrouter',
+        api_key: aiApiKey.value,
+        model: aiModel.value,
+      },
     })
   })
-  alert('Configurações salvas com sucesso!')
+  if (!silent) {
+    alert('Configurações salvas com sucesso!')
+  }
 }
 
 const appUpdateInfo = ref({ current_version: APP_VERSION, latest_version: APP_VERSION, update_available: { stable: false } })
