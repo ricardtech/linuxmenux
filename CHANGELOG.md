@@ -2,6 +2,15 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.6] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.270 linhas** de código em **94 arquivos-fonte** (`9.405` `.vue` · `7.297` `.py` · `7.610` `.css` · `2.668` `.js` · `272` `.sh` · `18` `.service`).
+
+### Adicionado
+- **Persistência da página atual no `F5` (`App.vue`)**: sincronização bidirecional de `activeTab` com `window.location.hash` (`#overview`, `#containers`, `#network-flow`, `#admin-security`, etc.) e `localStorage`, mantendo a tela exata após recarregar a página e suportando navegação via `hashchange`.
+- **Topologia de Rede enriquecida (`NetworkView.vue`)**: portados do `MonitorSystem` os filtros de busca por contêiner/nó, botão **Ativos (N)**, legenda Download/Upload e a lista em grid de **Consumidores & Containers Mapeados** abaixo do diagrama SVG ao vivo + análise por IA.
+
 ## [1.4.5] - 26/11/2026
 
 ### 📊 Métricas de Código

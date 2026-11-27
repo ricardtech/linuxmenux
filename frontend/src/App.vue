@@ -620,8 +620,57 @@ async function onAuthAuthenticated(payload) {
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, CategoryScale, Title, Tooltip, Legend, Filler)
 
-// Navigation State
-const activeTab = ref('overview')
+// Navigation State (persiste aba atual no F5 via URL hash + localStorage)
+const VALID_TABS = new Set([
+  'overview',
+  'apps',
+  'containers',
+  'storage',
+  'network',
+  'network-overview',
+  'network-flow',
+  'network-interfaces',
+  'hardware',
+  'backup',
+  'terminal',
+  'admin',
+  'admin-logs',
+  'admin-security',
+  'admin-audit',
+  'admin-settings',
+  'admin-about',
+])
+
+function resolveInitialTab() {
+  if (typeof window !== 'undefined') {
+    const hashTab = window.location.hash.replace(/^#/, '').trim()
+    if (VALID_TABS.has(hashTab)) return hashTab
+    const saved = localStorage.getItem('linuxmenux-active-tab') || ''
+    if (VALID_TABS.has(saved)) return saved
+  }
+  return 'overview'
+}
+
+const activeTab = ref(resolveInitialTab())
+
+watch(activeTab, (tab) => {
+  if (typeof window === 'undefined' || !VALID_TABS.has(tab)) return
+  try {
+    localStorage.setItem('linuxmenux-active-tab', tab)
+    if (window.location.hash !== `#${tab}`) {
+      window.history.replaceState(null, '', `#${tab}`)
+    }
+  } catch {}
+}, { immediate: true })
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('hashchange', () => {
+    const hashTab = window.location.hash.replace(/^#/, '').trim()
+    if (VALID_TABS.has(hashTab) && activeTab.value !== hashTab) {
+      activeTab.value = hashTab
+    }
+  })
+}
 const nodeMenuOpen = ref(false)
 const adminMenuOpen = ref(false)
 const loading = ref(false)
