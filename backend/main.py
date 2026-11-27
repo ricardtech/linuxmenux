@@ -1385,13 +1385,82 @@ def post_ai_network_diagnosis():
         }
 
     net = get_real_network_info()
+    fw_smart = {}
+    fw_low = {}
+    try:
+        from services.linux_ops import _inspect_firewall_smart
+        fw_smart = _inspect_firewall_smart()
+    except Exception:
+        pass
+    try:
+        fw_low = inspect_firewall()
+    except Exception:
+        pass
+
+    default_route = ""
+    try:
+        rp = subprocess.run(["ip", "route", "show", "default"], capture_output=True, text=True, timeout=3)
+        if rp.returncode == 0:
+            default_route = rp.stdout.strip()
+    except Exception:
+        pass
+
+    docker_net_summary = []
+    try:
+        dp = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}|{{.Status}}|{{.Ports}}|{{.Networks}}"],
+            capture_output=True,
+            text=True,
+            timeout=4,
+        )
+        if dp.returncode == 0 and dp.stdout.strip():
+            for line in dp.stdout.splitlines()[:25]:
+                parts = line.split("|")
+                docker_net_summary.append({
+                    "name": parts[0] if len(parts) > 0 else "",
+                    "status": parts[1] if len(parts) > 1 else "",
+                    "ports": parts[2] if len(parts) > 2 else "",
+                    "networks": parts[3] if len(parts) > 3 else "",
+                })
+    except Exception:
+        pass
+
     prompt_data = {
         "default_interface": net.get("default_interface"),
+        "default_ip": net.get("default_ip"),
         "default_media": net.get("default_media"),
         "default_speed": net.get("default_speed"),
-        "active_physical": [p.get("name") for p in net.get("physical_interfaces", []) if p.get("status") == "up"],
-        "bridges": [b.get("name") for b in net.get("bridge_interfaces", []) if b.get("status") == "up"],
-        "running_containers": [c.get("name") for c in net.get("vm_lxc_interfaces", []) if c.get("vm_status") == "running"],
+        "default_route": default_route,
+        "dns_servers": net.get("dns_servers", []),
+        "physical_interfaces": [
+            {
+                "name": p.get("name"),
+                "status": p.get("status"),
+                "ip": p.get("ip"),
+                "mtu": p.get("mtu"),
+                "speed": p.get("speed_str") or p.get("speed"),
+            }
+            for p in net.get("physical_interfaces", [])
+        ],
+        "bridges": [
+            {
+                "name": b.get("name"),
+                "status": b.get("status"),
+                "ip": b.get("ip"),
+                "mtu": b.get("mtu"),
+            }
+            for b in net.get("bridge_interfaces", [])
+        ],
+        "firewall": {
+            "engine": fw_smart.get("engine"),
+            "active": fw_smart.get("active"),
+            "default_policy": fw_smart.get("default_policy"),
+            "rules_count": len(fw_smart.get("parsed_rules") or []),
+            "iptables_input_rules": fw_low.get("input_rules_count", 0),
+            "iptables_forward_rules": fw_low.get("forward_rules_count", 0),
+            "docker_user_rules": len(fw_low.get("docker_user_rules") or []),
+        },
+        "containers_network": docker_net_summary,
     }
     try:
         content = _call_ai_chat(

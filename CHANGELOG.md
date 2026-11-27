@@ -2,6 +2,14 @@
 
 Todas as mudanças notáveis do **Linux Menux - Monitor** serão documentadas neste arquivo (formato baseado em Keep a Changelog, com datas no padrão brasileiro `DD/MM/AAAA`).
 
+## [1.4.8] - 26/11/2026
+
+### 📊 Métricas de Código
+- **Total**: **27.645 linhas** de código em **94 arquivos-fonte** (`9.535` `.vue` · `7.542` `.py` · `7.610` `.css` · `2.668` `.js` · `272` `.sh` · `18` `.service`).
+
+### Melhorado
+- **Diagnóstico AIOps com contexto real completo (`main.py`)**: o endpoint `/api/ai/network-diagnosis` agora envia para a IA os endereços IP e MTU das interfaces físicas e bridges, rota padrão (`ip route show default`), servidores DNS, estado completo do Firewall (`engine`, `active`, política padrão, contagem de regras em `INPUT`/`FORWARD`/`DOCKER-USER`) e portas/redes dos containers Docker em execução, eliminando análises limitadas e permitindo validar NAT, MTU, DNS e isolamento real.
+
 ## [1.4.7] - 26/11/2026
 
 ### 📊 Métricas de Código
